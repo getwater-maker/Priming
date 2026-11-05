@@ -2,6 +2,7 @@
 // node test/license-gate.smoke.js — 🔐 회원 로그인 관문 E2E(v0.9.26) — 이 PC 안의 가짜 회원 서버(127.0.0.1)로만. 진짜 Supabase·계정은 쓰지 않는다.
 //   ① 로그인 전엔 관문만 보이고 main 이 제작 IPC 를 거부 ② 틀린 비밀번호 ③ 맞으면 앱이 열린다 ④ 회원 아님·PC 초과 안내
 //   ⑤ 다시 켜면 저장된 로그인으로 바로(토큰은 암호화 저장) ⑥ 서버가 꺼져도 7일 여유 ⑦ 오류 줄 → 지운 로그가 서버로 ⑧ 👤 계정 탭 · 로그아웃
+//   ⑨ 앱 가입 + 가입 코드(서버에 신청 기능이 없을 때의 예전 흐름) ⑩ 🗓 기간 골라 가입 → 승인 대기 → 승인되면 열림 · 거절(v1.0.32)
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -34,6 +35,7 @@ const server = http.createServer((req, res) => {
       if (who === 'nomember@test') return send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'full@test') return send(200, { ok: false, member: true, reason: 'device_limit', device_limit: 2, devices: [{ device_id: 'aaaaaaaa1', name: '집PC' }, { device_id: 'bbbbbbbb2', name: '회사PC' }] });
       if (who === 'admin@test') return send(200, { ok: true, member: true, admin: true, expires_at: null, device_limit: null, devices: [] });
+      if (who === 'waiter@test.kr') return SRV.appl && SRV.appl.status === 'approved' ? send(200, { ok: true, member: true, admin: false, expires_at: '2099-01-01T00:00:00Z', device_limit: 2, devices: [] }) : send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'newbie@test.kr') return SRV.redeemed ? send(200, { ok: true, member: true, admin: false, expires_at: '2099-01-01T00:00:00Z', device_limit: 2, devices: [] }) : send(200, { ok: false, member: false, reason: 'not_member', devices: [] });
       if (who === 'good@test') return send(200, { ok: true, member: true, admin: false, expires_at: '2099-12-31T00:00:00Z', device_limit: 2, devices: [{ device_id: j.p_device_id, name: j.p_device_name, last_seen: '2026-10-15T00:00:00Z' }] });
       return send(401, { msg: 'jwt' });
@@ -45,6 +47,11 @@ const server = http.createServer((req, res) => {
     if (req.url.endsWith('/rpc/get_my_consent')) return send(200, null);
     if (req.url.endsWith('/rpc/accept_consents')) { SRV.consents = (SRV.consents || 0) + 1; return send(204, {}); }
     if (req.url.endsWith('/rpc/priming_redeem_code')) { if (j.p_code === 'CODE-30') { SRV.redeemed = true; return send(200, { ok: true, days: 30, expires_at: '2099-01-01T00:00:00Z' }); } return send(200, { ok: false, reason: 'invalid_code' }); }
+    // 🗓 기간 골라 가입(v1.0.32) — SRV.applyOn 이 거짓이면 서버에 아직 없음(404 → 예전 코드 흐름)
+    if (/\/rpc\/priming_(plans|apply|application_mine)$/.test(req.url) && !SRV.applyOn) return send(404, {});
+    if (req.url.endsWith('/rpc/priming_plans')) return send(200, { ok: true, plans: [1, 3, 6, 12].map((m) => ({ months: m, price_krw: m * 11000 })) });
+    if (req.url.endsWith('/rpc/priming_apply')) { SRV.appl = { id: 1, months: j.p_months, price_krw: j.p_months * 11000, status: 'pending', depositor: 'waiter', created_at: '2026-11-05T01:00:00Z' }; SRV.applies = (SRV.applies || 0) + 1; return send(200, { ok: true, application: SRV.appl }); }
+    if (req.url.endsWith('/rpc/priming_application_mine')) return send(200, { ok: true, application: SRV.appl || null, bank: SRV.appl && SRV.appl.status === 'pending' ? { bank_name: '시험은행', account_no: '111-222-333', holder: '시험예금주' } : null, depositor_rule: '가입 이메일 @ 앞부분' });
     if (req.url.endsWith('/rpc/priming_log')) { SRV.logs.push(j); return send(200, { ok: true, id: SRV.logs.length }); }
     send(404, {});
   });
@@ -169,6 +176,47 @@ async function launch() {
     await A.win.evaluate(() => window.api.licenseLogout());
     await A.win.reload();
     await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
+    // ⑩ 🗓 기간 골라 가입 → 승인 대기 → 관리자 승인 → 주기 확인으로 열린다(v1.0.32)
+    SRV.applyOn = true;
+    await A.win.evaluate(() => { window.__PM_LIC_POLL_MS = 1500; });
+    await A.win.click('[data-testid="license-tab-signup"]'); await sleep(500);
+    ok(await A.win.locator('[data-testid="license-plans"]').isVisible() && /12개월/.test(await A.win.textContent('[data-testid="license-plans"]')) && /132,000원/.test(await A.win.textContent('[data-testid="license-plans"]')), '⑩ 가입 화면에 1·3·6·12개월 + 서버 금액');
+    ok(!(await A.win.locator('[data-testid="license-code"]').isVisible()), '⑩ 코드 칸은 「코드가 있으신가요?」로 접혀 있다');
+    await A.win.fill('[data-testid="license-email"]', 'waiter@test.kr');
+    await A.win.fill('[data-testid="license-password"]', 'abcdef');
+    await A.win.fill('[data-testid="license-password2"]', 'abcdef');
+    await A.win.check('[data-testid="license-agree"]');
+    ok(await A.win.locator('[data-testid="license-signup"]').isDisabled(), '⑩ 기간을 고르기 전엔 가입 버튼이 잠긴다');
+    await A.win.click('[data-testid="license-code-toggle"]');
+    ok(await A.win.locator('[data-testid="license-code"]').isVisible(), '⑩ 펼치면 코드 칸이 나온다');
+    await A.win.click('[data-testid="license-code-toggle"]');
+    await A.win.click('[data-testid="license-plan-3"]');
+    await A.win.click('[data-testid="license-signup"]');
+    await A.win.waitForSelector('[data-testid="license-wait"]', { timeout: 10000 });
+    const wt = await A.win.textContent('[data-testid="license-wait"]');
+    ok(SRV.applies === 1 && SRV.appl.months === 3, '⑩ 가입하며 고른 3개월로 신청 1건');
+    ok(/3개월/.test(wt) && /33,000원/.test(wt) && /시험은행 111-222-333/.test(wt) && /시험예금주/.test(wt) && /waiter/.test(wt) && /이메일 @ 앞부분/.test(wt), '⑩ 승인 대기 화면 = 기간·금액·계좌·입금자명(서버 값)');
+    ok(!(await A.win.$('[data-testid="license-msg"]')), '⑩ 대기 중엔 「이용 기간 없음」 오류 상자를 띄우지 않는다');
+    await A.win.click('[data-testid="license-change-plan"]');
+    await A.win.click('[data-testid="license-plan-12"]');
+    await A.win.click('[data-testid="license-apply"]');
+    await A.win.waitForSelector('[data-testid="license-wait"]', { timeout: 5000 });
+    ok(SRV.applies === 2 && /12개월/.test(await A.win.textContent('[data-testid="license-wait-plan"]')), '⑩ 기간 바꾸기 → 12개월로 고쳐 신청');
+    SRV.appl.status = 'approved';   // 관리자가 사이트에서 「승인」
+    await A.win.waitForSelector('[data-testid="app-title"]', { timeout: 10000 });
+    ok(true, '⑩ 승인되면 주기 확인으로 곧바로 앱이 열린다(다시 확인을 누르지 않아도)');
+    await A.win.evaluate(() => window.api.licenseLogout());
+    await A.win.reload();
+    await A.win.waitForSelector('[data-testid="license-gate"]', { timeout: 15000 });
+    // 거절된 계정 — 다시 고르기
+    SRV.appl = { id: 2, months: 1, price_krw: 11000, status: 'rejected', admin_note: '입금 확인 안 됨' };
+    await A.win.fill('[data-testid="license-email"]', 'waiter@test.kr');
+    await A.win.fill('[data-testid="license-password"]', 'pw-test-1');
+    await A.win.click('[data-testid="license-login"]');
+    await A.win.waitForSelector('[data-testid="license-rejected"]', { timeout: 8000 });
+    ok(/입금 확인 안 됨/.test(await A.win.textContent('[data-testid="license-rejected"]')) && await A.win.locator('[data-testid="license-apply"]').isVisible(), '⑩ 거절 = 관리자 메모 + 다시 신청 단추');
+    await A.win.click('text=다른 계정으로'); await sleep(400);
+    SRV.applyOn = false;
     // 👑 관리자 계정 = owner true
     await A.win.fill('[data-testid="license-email"]', 'admin@test');
     await A.win.fill('[data-testid="license-password"]', 'pw-test-1');

@@ -2087,6 +2087,19 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .licwarn{margin:-4px 0 0;color:var(--fg-b4412b);font-size:12px}
 .licagree{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--base)}
 .licagree input{margin-top:3px;padding:0}
+/* 🗓 기간 골라 가입 · 승인 대기(v1.0.32) */
+.licplans{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.licplans button{display:flex;flex-direction:column;align-items:center;gap:2px;background:var(--card);color:var(--base);border:1px solid var(--line-2);padding:8px 6px}
+.licplans button span{font-size:12.5px;color:var(--muted,var(--fg-7a6c58))}
+.licplans button.on{border-color:var(--accent);background:var(--accent);color:var(--fg-ffffff)}
+.licplans button.on span{color:var(--fg-ffffff)}
+.liclink{align-self:flex-start;background:transparent;border:none;color:var(--accent-d);padding:2px 0;font-size:12.5px}
+.liclink:hover:not(:disabled){background:transparent;text-decoration:underline;color:var(--accent-d)}
+.licwait{display:flex;flex-direction:column;gap:8px;border:1px solid var(--accent);border-radius:var(--r-md);padding:12px}
+.licwait dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:13px}
+.licwait dt{color:var(--muted,var(--fg-7a6c58))}
+.licwait dd{margin:0;user-select:text}
+.licwait small{color:var(--muted,var(--fg-7a6c58))}
 
 /* 🔐 구글로 계속하기 · 🛍 교차 노출 안내(v0.9.100) */
 .licgoogle{display:flex;align-items:center;justify-content:center;gap:10px;background:var(--bg-ffffff);color:var(--fg-3c4043);border:1px solid var(--bd-dadce0);font-weight:600;padding:10px 12px}

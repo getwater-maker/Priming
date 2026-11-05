@@ -41,6 +41,21 @@ function pointsOf(j) {
 // 🪙 kie 보유 크레딧(관리자에게만) — 서버가 priming_license 에 kie_credits 를 주면 그 숫자, 없으면 null(v0.9.82)
 function kieOf(j) { const v = j && j.kie_credits; return v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v); }
 
+// 🗓 가입 기간 선택지(로이 2026-11-05) — 개월 수만 앱에 있다. 금액·크레딧은 서버 app_plans 에서만(관리자 화면이 고친다)
+const PLAN_MONTHS = [1, 3, 6, 12];
+function planOf(p) {
+  const m = Number(p && p.months), won = Number(p && p.price_krw);
+  if (!PLAN_MONTHS.includes(m) || !Number.isFinite(won) || won < 0) return null;
+  return { months: m, priceKrw: Math.round(won), onSale: p.on_sale !== false };
+}
+const APP_STATUS = new Set(['pending', 'approved', 'rejected', 'canceled']);
+function appOf(a) {
+  if (!a || typeof a !== 'object' || !APP_STATUS.has(a.status)) return null;
+  const won = Number(a.price_krw);
+  return { id: a.id == null ? null : String(a.id), months: Number(a.months) || null, priceKrw: Number.isFinite(won) ? Math.round(won) : null, status: a.status,
+    depositor: a.depositor ? String(a.depositor) : '', createdAt: a.created_at || null, decidedAt: a.decided_at || null, note: a.admin_note ? String(a.admin_note) : '' };
+}
+
 function createLicense(opts = {}) {
   const dir = opts.dir || defaultDir();
   const doFetch = opts.fetch || ((...a) => fetch(...a));
@@ -101,7 +116,8 @@ function createLicense(opts = {}) {
       if (r.status === 429 || /rate|too many/i.test(msg)) return { ok: false, reason: 'rate_limited' };
       return { ok: false, reason: 'server' };
     }
-    if (opts.consent) writeState({ consentPending: em.toLowerCase() });   // 동의는 세션이 생긴 첫 로그인 직후 서버에 남긴다(확인 메일을 거치면 그때)
+    if (opts.consent) writeState({ consentPending: em.toLowerCase() });
+    if (PLAN_MONTHS.includes(Number(opts.months))) writeState({ applyPending: { email: em.toLowerCase(), months: Number(opts.months) } });   // 고른 기간 — 세션이 생긴 뒤 applicationMine 이 신청(바로 세션이면 부르는 쪽이 곧 apply)   // 동의는 세션이 생긴 첫 로그인 직후 서버에 남긴다(확인 메일을 거치면 그때)
     if (!j.access_token) {   // 이메일 확인 대기 — 이미 가입된 주소도 같은 응답(계정 존재 노출 방지)
       return { ok: false, reason: 'confirm_mail', email: em };
     }
@@ -121,6 +137,49 @@ function createLicense(opts = {}) {
     if (r.status === 401) return { ok: false, reason: 'logged_out' };
     if (!r.ok || !j || typeof j !== 'object') return { ok: false, reason: 'server' };
     return j.ok ? { ok: true, days: j.days == null ? null : Number(j.days), expiresAt: j.expires_at || null } : { ok: false, reason: String(j.reason || 'invalid_code') };
+  }
+  // 🗓 기간 골라 가입(v1.0.32 · 로이 2026-11-05 「가입할 때 기간 선택 → 입금 → 관리자 승인 한 번」 · 약속 = docs/요청서_wise-priming-기간선택가입.md)
+  //   금액·계좌·입금자명 규칙은 전부 서버 값(⛔ 앱에 적지 않는다) · 서버에 RPC 가 아직 없으면(404) unavailable → 화면은 예전 「가입 코드」 흐름
+  async function rpc(name, body, needTok) {
+    const tok = await accessToken();
+    if (needTok && !tok) return { reason: 'logged_out' };
+    let r, j;
+    try { r = await doFetch(`${apiBase()}/rest/v1/rpc/${name}`, { method: 'POST', headers: H(tok), body: JSON.stringify(body || {}) }); j = await r.json().catch(() => null); }
+    catch (_) { return { reason: 'offline' }; }
+    if (r.status === 404) return { reason: 'unavailable' };
+    if (r.status === 401) return { reason: needTok ? 'logged_out' : 'server' };
+    if (!r.ok || !j || typeof j !== 'object' || Array.isArray(j)) return { reason: 'server' };
+    return { j };
+  }
+  async function plans() {   // 가입 전에도 부른다(공개 키만 · 토큰이 있으면 같이)
+    const x = await rpc('priming_plans', {}, false);
+    if (!x.j) return { ok: false, reason: x.reason };
+    if (x.j.ok === false) return { ok: false, reason: String(x.j.reason || 'server') };
+    const list = (Array.isArray(x.j.plans) ? x.j.plans : []).map(planOf).filter((p) => p && p.onSale);
+    return list.length ? { ok: true, plans: list.sort((a, b) => a.months - b.months) } : { ok: false, reason: 'no_plans' };
+  }
+  async function apply(months) {
+    const m = Number(months);
+    if (!PLAN_MONTHS.includes(m)) return { ok: false, reason: 'bad_months' };
+    const x = await rpc('priming_apply', { p_months: m }, true);
+    if (!x.j) return { ok: false, reason: x.reason };
+    if (!x.j.ok) return { ok: false, reason: String(x.j.reason || 'server') };
+    const st = readState(); if (st.applyPending) writeState({ applyPending: null });
+    return { ok: true, application: appOf(x.j.application) };
+  }
+  // 내 가장 최근 신청 + (입금 대기일 때만) 계좌 — 이메일 확인을 거쳐 가입 때 고른 기간이 아직 신청되지 않았으면 여기서 한 번 신청한다
+  async function applicationMine() {
+    let x = await rpc('priming_application_mine', {}, true);
+    if (!x.j) return { ok: false, reason: x.reason };
+    if (x.j.ok === false) return { ok: false, reason: String(x.j.reason || 'server') };
+    const st = readState(), s = loadSession();
+    if (!x.j.application && st.applyPending && s && String(s.email || '').toLowerCase() === st.applyPending.email) {
+      const a = await apply(st.applyPending.months);
+      if (a.ok) { x = await rpc('priming_application_mine', {}, true); if (!x.j) return { ok: false, reason: x.reason }; }
+    }
+    const a = appOf(x.j.application);
+    const b = x.j.bank && a && a.status === 'pending' ? x.j.bank : null;
+    return { ok: true, application: a, bank: b ? { bankName: String(b.bank_name || ''), accountNo: String(b.account_no || ''), holder: String(b.holder || '') } : null, depositorRule: x.j.depositor_rule ? String(x.j.depositor_rule) : '' };
   }
   // 🆕 구글 로그인(PKCE) — 돌아온 code 를 세션으로 맞바꾼다(core/license-oauth 가 code 를 받아 온다) · 구글로 들어온 사람도 앱에서 약관 동의를 한 번 남긴다
   async function exchangeCode(code, verifier) {
@@ -230,7 +289,7 @@ function createLicense(opts = {}) {
     };
   }
 
-  return { deviceId, login, signup, redeem, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
+  return { deviceId, login, signup, redeem, plans, apply, applicationMine, exchangeCode, products, apiBase, logout, check, accessToken, sendLog, updateSource, readState, writeState, loadSession, dir };
 }
 
 /** Electron 앱에서 쓰는 기본 묶음 — safeStorage 는 app ready 뒤에만 쓸 수 있다(부르는 쪽이 whenReady 를 기다린다) */
@@ -243,4 +302,4 @@ function forApp() {
   });
 }
 
-module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, SITE_DEVICES, SITE_ADMIN, SITE_CHARGE, GRACE_MS };
+module.exports = { isSiteUrl, CONSENT, createLicense, forApp, pointsOf, kieOf, PLAN_MONTHS, planOf, appOf, SITE_DEVICES, SITE_ADMIN, SITE_CHARGE, GRACE_MS };

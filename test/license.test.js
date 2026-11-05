@@ -30,6 +30,10 @@ function fakeServer() {
       S.accessN++; return res(200, { access_token: 'acc' + S.accessN, refresh_token: 'ref' + S.accessN, expires_in: 3600, user: { email: 'roy@x.kr' } });
     }
     const auth = (init.headers.Authorization || '').replace('Bearer ', '');
+    if (url.endsWith('/rpc/priming_plans')) {   // 공개(토큰 없이도) — 판매 안 하는 것·이상한 값은 앱이 거른다
+      if (S.noApply) return res(404, {});
+      return res(200, { ok: true, plans: [{ months: 12, price_krw: 99000 }, { months: 1, price_krw: 10000 }, { months: 3, price_krw: 27000, on_sale: false }, { months: 2, price_krw: 5 }, { months: 6, price_krw: 'x' }] });
+    }
     if (!/^acc\d+$/.test(auth)) return res(401, { message: 'JWT' });
     if (url.endsWith('/rpc/priming_license')) { S.lastDevice = body.p_device_id; return res(200, S.member); }
     if (url.endsWith('/rpc/get_my_consent')) { if (S.getFail) return res(500, {}); return res(200, S.consentRow === undefined ? null : S.consentRow); }
@@ -41,6 +45,14 @@ function fakeServer() {
       return res(200, { ok: false, reason: 'invalid_code' });
     }
     if (url.endsWith('/rpc/priming_log')) { S.logs.push(body); return res(200, { ok: true, id: S.logs.length }); }
+    // 🗓 기간 골라 가입(v1.0.32) — S.noApply 면 서버에 아직 없음(404)
+    if (/\/rpc\/priming_(plans|apply|application_mine)$/.test(url) && S.noApply) return res(404, {});
+    if (url.endsWith('/rpc/priming_apply')) {
+      if (![1, 3, 6, 12].includes(body.p_months)) return res(200, { ok: false, reason: 'bad_months' });
+      S.appl = { id: 7, months: body.p_months, price_krw: body.p_months * 10000, status: 'pending', depositor: 'roy', created_at: '2026-11-05T01:00:00Z' };
+      return res(200, { ok: true, application: S.appl });
+    }
+    if (url.endsWith('/rpc/priming_application_mine')) return res(200, { ok: true, application: S.appl || null, bank: { bank_name: '가짜은행', account_no: '000-00', holder: '예금주' }, depositor_rule: '이메일 앞부분' });
     return res(404, {});
   };
   return S;
@@ -170,10 +182,43 @@ const mk = (S, clock) => {
       const S4 = fakeServer(); const m4 = mk(S4, clock); await m4.L.login('roy@x.kr', 'right'); ok(!S4.consents, '가입으로 동의하지 않은 로그인은 동의를 보내지 않는다'); }
     fs.rmSync(dir, { recursive: true, force: true }); }
 
+  console.log('[9] 🗓 기간 골라 가입 · 승인 대기(v1.0.32)');
+  { const clock = { t: 1e12 }; const S = fakeServer(); const { L, dir } = mk(S, clock);
+    const P = await L.plans();
+    ok(P.ok && JSON.stringify(P.plans) === JSON.stringify([{ months: 1, priceKrw: 10000, onSale: true }, { months: 12, priceKrw: 99000, onSale: true }]), '기간표 = 서버 금액 그대로 · 판매 안 함·1/3/6/12 밖·금액 이상은 뺀다 · 개월순: ' + JSON.stringify(P.plans));
+    ok(!JSON.stringify(S.calls.filter((c) => c.url.endsWith('/priming_plans')).map((c) => c.init.headers)).includes('Authorization'), '로그인 전 기간표는 공개 키만으로');
+    ok((await L.apply(3)).reason === 'logged_out', '로그인 전 신청 = logged_out');
+    ok((await L.apply(2)).reason === 'bad_months' && !S.calls.some((c) => c.url.endsWith('/priming_apply')), '1·3·6·12 밖 = bad_months(서버 호출 없음)');
+    await L.login('roy@x.kr', 'right');
+    ok((await L.applicationMine()).application === null, '신청 전 = application null');
+    const a = await L.apply(6);
+    ok(a.ok && a.application.status === 'pending' && a.application.months === 6 && a.application.priceKrw === 60000, '신청 → pending · 금액은 서버 값');
+    const m = await L.applicationMine();
+    ok(m.ok && m.bank && m.bank.accountNo === '000-00' && m.depositorRule === '이메일 앞부분', '입금 대기 = 계좌·입금자명 규칙(서버 값)');
+    S.appl = { ...S.appl, status: 'rejected', admin_note: '입금 없음' };
+    const r = await L.applicationMine();
+    ok(r.application.status === 'rejected' && r.application.note === '입금 없음' && r.bank === null, '거절 = 메모 · 계좌는 싣지 않는다');
+    S.noApply = true;
+    ok((await L.plans()).reason === 'unavailable' && (await L.applicationMine()).reason === 'unavailable' && (await L.apply(1)).reason === 'unavailable', '서버에 RPC 가 아직 없으면(404) unavailable → 화면은 예전 코드 흐름');
+    S.noApply = false;
+    // 이메일 확인을 거치는 가입 — 고른 기간을 기억했다가 첫 로그인 뒤 내 신청을 볼 때 한 번 신청
+    const S2 = fakeServer(); S2.confirm = true; const m2 = mk(S2, clock);
+    ok((await m2.L.signup('h@x.kr', 'abcdef', { consent: true, months: 12 })).reason === 'confirm_mail' && m2.L.readState().applyPending.months === 12, '확인 메일 대기 = 고른 기간을 기억');
+    await m2.L.login('h@x.kr', 'right');
+    const m2a = await m2.L.applicationMine();
+    ok(m2a.application && m2a.application.months === 12 && !m2.L.readState().applyPending, '첫 로그인 뒤 내 신청 = 기억한 기간으로 한 번 신청 · 기억은 지운다');
+    await m2.L.applicationMine();
+    ok(S2.calls.filter((c) => c.url.endsWith('/priming_apply')).length === 1, '두 번 신청하지 않는다');
+    fs.rmSync(dir, { recursive: true, force: true }); fs.rmSync(m2.dir, { recursive: true, force: true }); }
+
   console.log('[7] 소스 검사');
   { const src = fs.readFileSync(path.join(__dirname, '..', 'core', 'license.js'), 'utf8');
     ok(/sb_publishable_[A-Za-z0-9_-]{20,}/.test(src) && !/sb_secret_/.test(src) && !/service_role/.test(src.replace(/\/\/.*|\*.*$/gm, '')), '공개 키만 들어 있다(secret·service_role 없음)');
-    ok(GRACE_MS === 7 * 24 * 3600 * 1000, '여유 = 7일'); }
+    ok(GRACE_MS === 7 * 24 * 3600 * 1000, '여유 = 7일');
+    const gate = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'src', 'LicenseGate.jsx'), 'utf8');
+    ok(!/[0-9]{2,}-[0-9]{2,}-[0-9]{3,}/.test(src + gate) && !/price_krw\s*[:=]\s*\d/.test(src + gate), '🗓 계좌번호·금액을 앱 코드에 적지 않는다(서버 값만)');
+    const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    ok(['license-plans', 'license-apply', 'license-application'].every((c) => new RegExp(`LIC_OPEN = new Set\\([^)]*'${c}'`).test(main)), '🗓 로그인 화면이 부르는 새 IPC 는 LIC_OPEN 에 있다'); }
 
   console.log(`\n${fail ? '❌' : '✅'} license — ${pass} 통과 / ${fail} 실패`);
   process.exit(fail ? 1 : 0);

@@ -175,7 +175,7 @@ const LIC = {
   enforce: process.env.PM_LICENSE_FORCE === '1' || (app.isPackaged && !process.env.PM_UI_SMOKE),
   state: null, ready: null, L: null,
 };
-const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-google', 'license-google-cancel', 'license-products', 'license-open-url', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
+const LIC_OPEN = new Set(['license-state', 'license-login', 'license-signup', 'license-redeem', 'license-plans', 'license-apply', 'license-application', 'license-google', 'license-google-cancel', 'license-products', 'license-open-url', 'license-logout', 'license-recheck', 'license-open-site', 'append-log', 'refocus-window', 'focus-window']);
 function licApi() { if (!LIC.L) LIC.L = require('./core/license').forApp(); return LIC.L; }
 function licOk() { return !LIC.enforce || !!(LIC.state && LIC.state.ok); }
 // 👑 로이(관리자) 전용 동작인가 — 개발 실행·E2E 는 로이 PC 로 본다(v0.9.27 · GPU 온도 기록 같은 로이 요청 기능은 회원 PC 에서 돌지 않게)
@@ -13449,13 +13449,23 @@ async function _licFinish(extra) {
   return { ...licPublic(LIC.state), ...extra };
 }
 ipcMain.handle('license-signup', async (_e, a = {}) => {
-  const r = await licApi().signup(a.email, a.password, { consent: true });   // 화면이 약관 체크 없이는 가입 버튼을 열지 않는다
+  const months = String(a.code || '').trim() ? null : Number(a.months) || null;   // 🗓 코드가 있으면 코드가 이긴다(이벤트·체험) · 없으면 고른 기간으로 신청
+  const r = await licApi().signup(a.email, a.password, { consent: true, months });   // 화면이 약관 체크 없이는 가입 버튼을 열지 않는다 · 확인 메일을 거치면 고른 기간은 첫 로그인 뒤 신청
   if (!r.ok) { log(`🔐 앱 가입 — ${r.reason}`); LIC.state = { ok: false, reason: r.reason, email: r.email || String(a.email || '').trim() }; return licPublic(LIC.state); }
   log('🔐 앱 가입 ✓');
   let ex = {};
   if (String(a.code || '').trim()) { const c = await licApi().redeem(a.code); ex = c.ok ? { redeemDays: c.days } : { redeemReason: c.reason }; log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`); }
+  else if (months) { const p = await licApi().apply(months); ex = p.ok ? {} : { applyReason: p.reason }; log(p.ok ? `🔐 이용 신청 ✓ ${months}개월(승인 대기)` : `🔐 이용 신청 — ${p.reason}`); }
   return _licFinish(ex);
 });
+// 🗓 기간 골라 가입(v1.0.32 · docs/요청서_wise-priming-기간선택가입.md) — 기간표(금액은 서버) · 신청 · 내 신청(승인 대기 화면의 계좌·금액·입금자명 규칙). 계좌는 로그에 싣지 않는다
+ipcMain.handle('license-plans', async () => licApi().plans());
+ipcMain.handle('license-apply', async (_e, a = {}) => {
+  const p = await licApi().apply(a.months);
+  log(p.ok ? `🔐 이용 신청 ✓ ${Number(a.months)}개월(승인 대기)` : `🔐 이용 신청 — ${p.reason}`);
+  return p;
+});
+ipcMain.handle('license-application', async () => licApi().applicationMine());
 ipcMain.handle('license-redeem', async (_e, a = {}) => {
   const c = await licApi().redeem(a.code);
   log(c.ok ? `🔐 가입 코드 ✓${c.days ? ' · ' + c.days + '일' : ''}` : `🔐 가입 코드 — ${c.reason}`);
