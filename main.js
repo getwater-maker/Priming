@@ -392,7 +392,7 @@ function bookDTO(parsed) {
 function createWindow() {
   win = new BrowserWindow({
     width: 1240, height: 860,
-    title: process.env.PM_LAB ? 'Priming Lab' : 'Priming',
+    title: process.env.PM_LAB ? 'Priming Lab' : (ED.EDITION === 'member' ? 'Priming' : 'Priming-Studio'),   // 🏠 로이판 = Priming-Studio(판매판과 작업표시줄에서 구분 · 로이 2026-11-05)
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     backgroundColor: '#faf6f0',
     webPreferences: {
@@ -403,7 +403,8 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   // 🧪 Lab — 페이지 <title>(「Priming」)이 창 제목을 덮지 않게(작업표시줄에서 원본과 구분)
-  if (process.env.PM_LAB) win.on('page-title-updated', (e) => e.preventDefault());
+  // 🏠 로이판도 같은 까닭으로 막는다 — 창 제목 「Priming-Studio」 유지(판매판은 페이지 제목 「Priming」 그대로)
+  if (process.env.PM_LAB || ED.EDITION !== 'member') win.on('page-title-updated', (e) => e.preventDefault());
   // 화면 내 검색(Ctrl+F) — Electron 내장 find-in-page. 렌더된 텍스트를 찾아 강조·이동. 모든 모드 공통.
   win.webContents.on('found-in-page', (_e, r) => {
     try { win.webContents.send('find-result', { active: r.activeMatchOrdinal || 0, total: r.matches || 0 }); } catch {}

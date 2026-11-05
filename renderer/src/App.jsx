@@ -767,8 +767,9 @@ export default function App() {
   const [owner, setOwner] = useState(true);
   // 🏠🛒 판별 기능(v1.0.26 · main core/edition) — 로이 전용 기능은 owner 가 아니라 이것으로 가른다 · 읽기 전엔 전부 열림(예전 owner 기본값 true 와 같다)
   const [features, setFeatures] = useState(null);
+  const [edition, setEdition] = useState(null);   // 🏠🛒 'studio' = 로이판(헤더 「Priming-Studio」) · 'member' = 판매판(「Priming」)
   const feat = (id) => (features ? !!features[id] : true);
-  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setFeatures(s && s.features ? s.features : null); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { (async () => { try { const s = await api.licenseState(); setOwner(!s || !s.enforced || !!s.owner); setFeatures(s && s.features ? s.features : null); setEdition(s && s.edition ? s.edition : null); setPoints(s && s.points ? s.points : null); setLicKind(s ? { enforced: !!s.enforced, admin: !!s.admin, kie: s.kie == null ? null : s.kie, kieNoKey: !!s.kieNoKey } : null); } catch (_) {} })(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
   // 🪙 회원 포인트(지급 · 남음) — 5분마다 다시 읽는다(v0.9.72). 서버가 값을 안 주는 회원(원장이 비어 있음)·서버가 아직 준비 전이어도
   //   설치본(회원 확인을 켠 앱)에서는 칸이 보인다(v0.9.78 — 「포인트 0」) · 개발 실행·E2E(확인 끔)는 숨김
   const [points, setPoints] = useState(null);
@@ -7090,7 +7091,7 @@ export default function App() {
           예전엔 ①~④ 네 줄 + 로그가 한꺼번에 보여 헤더만 약 400px 이었다. 핸들러·버튼은 그대로 옮겼다. */}
       <header className={'vhead' + (acctPage ? ' acct-on' : '')}>
         <div className="menubar">
-            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>{api.isLab ? '🧪' : '🎬'} Priming{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
+            <h1 data-testid="app-title" style={{ cursor: 'pointer' }} title="누르면 www.primingwave.com 이 열립니다" onClick={() => api.openTubeSite()}>{api.isLab ? '🧪' : '🎬'} {edition === 'member' ? 'Priming' : <span className="ttl-studio">Priming-Studio{appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</span>}{edition !== 'member' ? null : appVersion ? <span className="ver" title={`앱 버전 ${appVersion}`}>v{shortVer(appVersion)}</span> : null}</h1>
             <button className={'ghost upd' + (upd.latest ? ' new' : '')} data-testid="app-update" disabled={upd.busy}
               title={upd.latest ? `새 버전 v${shortVer(upd.latest)} — 누르면 받아서 앱을 다시 시작합니다(작업 중이 아닐 때)` : '업데이트 확인 — 새 버전이 있으면 끄지 않고 바로 받아 다시 시작합니다(시작할 때 자동으로 받는 것은 그대로)'}
               onClick={runUpdate}>{upd.busy ? '⏳' : upd.latest ? `⬆ v${shortVer(upd.latest)} 업데이트` : '⟳'}</button>

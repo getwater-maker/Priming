@@ -15,6 +15,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
   try {
     const win = await app.firstWindow();
     await win.waitForSelector('[data-testid=app-title]', { timeout: 20000 });
+    // 🏠 로이판(edition.json 없음 = studio) = 헤더·창 제목 「Priming-Studio」(판매판과 구분 · v1.0.40)
+    await win.waitForFunction(() => /Priming-Studio/.test(document.querySelector('[data-testid=app-title]').textContent), null, { timeout: 5000 }).catch(() => {});
+    const hdr = await win.locator('[data-testid=app-title]').textContent();
+    ok(/Priming-Studio/.test(hdr), '로이판 헤더 = Priming-Studio — ' + JSON.stringify(hdr));
+    const wt = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle());
+    ok(wt === 'Priming-Studio', '로이판 창 제목 = Priming-Studio — ' + JSON.stringify(wt));
     await app.evaluate(({ shell }) => { globalThis.__opened = []; shell.openExternal = async (u) => { globalThis.__opened.push(String(u)); }; });
     await win.click('[data-testid=app-title]');
     await win.waitForTimeout(300);

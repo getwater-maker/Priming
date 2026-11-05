@@ -287,6 +287,9 @@ main{flex:1;overflow:auto;padding:14px 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .autosave-ind{font-size:var(--fs-xs);color:var(--fg-7a8a6a);align-self:center;white-space:nowrap;margin-left:2px}
 h1 .ver{font-size:var(--fs-xs);font-weight:600;color:var(--fg-a89878);margin-left:6px;vertical-align:middle}
+/* 🏠 로이판 「Priming-Studio」 — 이름이 7글자 길어 버전을 이름 아래 작은 줄로(1366px 메뉴 줄 한 줄 유지 · v1.0.40) */
+h1 .ttl-studio{display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.05;font-size:15px}
+h1 .ttl-studio .ver{margin-left:0;font-size:10px;line-height:1}
 .dur.over{color:var(--crimson);font-weight:800}
 .gprev.split{color:var(--crimson);border-color:var(--bd-e0a0a0);font-weight:700}
 .gprev.split:hover{background:var(--bg-fbeaea)}
