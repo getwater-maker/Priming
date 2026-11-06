@@ -119,6 +119,15 @@ print(json.dumps(out))
     ok(/"X-GPU-Deferred": "remote"/.test(A) && /status_code=503/.test(A) && /status_code=408/.test(A), '원격 때문이면 503 + X-GPU-Deferred · 아니면 408');
     ok(/@app\.get\("\/gpu-status"\)/.test(A) && /remote_active/.test(A), '/gpu-status');
     ok(/KST · %s\(%s\) 우선 · 미뤄진 이 PC 요청 %d건/.test(A), '기록 한 줄 = 시각 · 누구 · 미뤄진 수');
+    // 🧠 VRAM 관문 · 느려짐 자가 회복(2026-11-06 — 그림이 VRAM 을 쥔 채 다시 올려 공유 메모리로 밀린 모델이 4~12배 느려졌다)
+    const EM = A.slice(A.indexOf('def _ensure_model('), A.indexOf('@app.post("/release")'));
+    ok(EM.indexOf('_wait_vram_or_defer()') > -1 && EM.indexOf('_wait_vram_or_defer()') < EM.indexOf('load_model('), '다시 올리기 전에 빈 VRAM 을 확인한다');
+    ok(/"X-GPU-Deferred": "vram"/.test(A), 'VRAM 이 모자라면 503 X-GPU-Deferred: vram(앱이 실패로 세지 않는다)');
+    const VF = A.slice(A.indexOf('def _vram_free_gb'), A.indexOf('def _note_speed'));
+    ok(/nvmlDeviceGetMemoryInfo/.test(VF) && !/mem_get_info\(\)/.test(VF), '빈 VRAM = NVML(⛔ torch mem_get_info — WDDM 에선 남의 몫을 안 뺀다)');
+    ok((A.match(/_ensure_model\(allow_rehome=True\)/g) || []).length === 3 && (A.match(/_note_speed\(/g) || []).length === 4, '합성 세 입구가 속도를 재고 · 느려지면 다시 올린다');
+    ok(/def _remote_img_guard[\s\S]*?_ensure_model\(\)\n/.test(A), '원격 그림 지킴이는 다시 올리기(rehome)를 하지 않는다(GPU 차례 밖)');
+    ok(/def wake\(\):[\s\S]{0,400}except HTTPException[\s\S]{0,120}"reason": "vram"/.test(A), '/wake 도 VRAM 이 모자라면 올리지 않고 알린다');
   } else console.log('  · 건너뜀');
 
   console.log('[3] core/gpu-share');
@@ -178,6 +187,22 @@ print(json.dumps(out))
     try { await p.synthesize('가나다', { gpuWaitAborted: () => k >= 1 }); } catch (e) { err = e; }
     ok(err && k === 1, '중단이면 다시 보내지 않고 멈춘다: ' + (err && err.message));
     srv.close();
+    // 🧠 vram 미룸 — 실패로 세지 않고 · 안내는 「GPU 메모리」(아내 PC 탓으로 말하지 않는다)
+    let kv = 0;
+    const srv2 = http.createServer((req, res) => {
+      if (req.url !== '/tts') { res.writeHead(404); return res.end(); }
+      kv++;
+      if (kv <= 2) { res.writeHead(503, { 'Content-Type': 'application/json', 'X-GPU-Deferred': 'vram' }); return res.end('{"detail":"vram"}'); }
+      res.writeHead(200, { 'Content-Type': 'audio/wav' }); res.end(wav);
+    });
+    await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
+    const p2 = new Cls({ baseUrl: 'http://127.0.0.1:' + srv2.address().port, timeout: 5000 });
+    p2.ready = true;
+    const notes2 = [];
+    const r2 = await p2.synthesize('가나다', { onGpuWait: (s) => notes2.push(s) });
+    ok(r2 && r2.durationSec > 0.9 && kv === 3, 'vram 미룸 두 번 뒤 합성(실패로 세지 않음): ' + kv);
+    ok(notes2.length === 1 && /GPU 메모리/.test(notes2[0]) && !/아내/.test(notes2[0]), 'vram 안내 = GPU 메모리: ' + JSON.stringify(notes2));
+    srv2.close();
   }
 
   console.log('[5] main 연결(소스)');

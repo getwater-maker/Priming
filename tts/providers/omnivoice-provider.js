@@ -234,12 +234,15 @@ class OmniVoiceProvider {
     if (!deferT0) deferT0 = reqT0;
     const why = String(response.headers.get('x-gpu-deferred') || '');
     await response.arrayBuffer().catch(() => null);
-    if (stop && stop()) throw new Error(why === 'local-image' ? '중단됨 — 이 PC 의 다른 Priming 그림이 먼저라 기다리던 중이었습니다' : '중단됨 — 원격(아내 PC) 작업이 먼저라 기다리던 중이었습니다');
+    // 🧠 vram(서버 2026-11-06) = 다른 프로그램(그림 등)이 GPU 메모리를 쥐고 있어 서버가 음성 모델을 올리지 않았다 — 메모리가 비면 이어 간다
+    if (stop && stop()) throw new Error(why === 'local-image' ? '중단됨 — 이 PC 의 다른 Priming 그림이 먼저라 기다리던 중이었습니다' : why === 'vram' ? '중단됨 — 음성 서버의 GPU 메모리가 비기를 기다리던 중이었습니다' : '중단됨 — 원격(아내 PC) 작업이 먼저라 기다리던 중이었습니다');
     if (!noted) {
       noted = true;
       say(why === 'local-image'
         ? '🚦 이 PC 의 다른 Priming 프로그램(무인 제작 등)이 그림을 그리는 중이라 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다'
-        : '🚦 원격(아내 PC) 작업(음성·그림)이 먼저라 이 PC 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다');
+        : why === 'vram'
+          ? '🧠 음성 서버 PC 의 GPU 메모리를 다른 작업(그림 등)이 쥐고 있어 음성 모델을 올리지 못했습니다 — 메모리가 비면 바로 이어 갑니다'
+          : '🚦 원격(아내 PC) 작업(음성·그림)이 먼저라 이 PC 음성은 멈추고 기다립니다 — 끝나면 바로 이어 갑니다');
     }
     await new Promise((r) => setTimeout(r, 200));
     }
