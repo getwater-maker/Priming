@@ -128,6 +128,8 @@ print(json.dumps(out))
     ok((A.match(/_ensure_model\(allow_rehome=True\)/g) || []).length === 3 && (A.match(/_note_speed\(/g) || []).length === 4, '합성 세 입구가 속도를 재고 · 느려지면 다시 올린다');
     ok(/def _remote_img_guard[\s\S]*?_ensure_model\(\)\n/.test(A), '원격 그림 지킴이는 다시 올리기(rehome)를 하지 않는다(GPU 차례 밖)');
     ok(/def wake\(\):[\s\S]{0,400}except HTTPException[\s\S]{0,120}"reason": "vram"/.test(A), '/wake 도 VRAM 이 모자라면 올리지 않고 알린다');
+    const CF = A.slice(A.indexOf('def _comfy_free_if_idle'), A.indexOf('def _wait_vram_or_defer'));
+    ok(/_comfy_queue_n\(\) > 0/.test(CF) && /"\/free"/.test(CF) && /unload_models/.test(CF) && /_comfy_free_if_idle\(free\)/.test(A), 'VRAM 이 모자라면 그림 사이에서 쉬는 ComfyUI 만 모델을 내려놓게 한다(서로 기다림 방지)');
   } else console.log('  · 건너뜀');
 
   console.log('[3] core/gpu-share');
