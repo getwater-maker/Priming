@@ -130,7 +130,7 @@ print(json.dumps(out))
     ok(/def wake\(\):[\s\S]{0,400}except HTTPException[\s\S]{0,120}"reason": "vram"/.test(A), '/wake 도 VRAM 이 모자라면 올리지 않고 알린다');
     // 👥 누가·어떤 프로그램(v1.0.45 — 옛 트레이는 ComfyUI 에 그림이 돌면 누구 것이든 「로이 렌더」로 보였다)
     ok(/_note_app\(request\)/.test(A) && /def _who_status/.test(A) && /st\.update\(_who_status\(\)\)/.test(A), '/gpu-status 가 음성·그림을 쓰는 PC·프로그램을 알려 준다');
-    ok(/"priming-order": "Priming 무인 제작"/.test(A) && /"adonai-gongbang"/.test(A) && /"ua:python"/.test(A), '프로그램 이름표(머리 X-Priming-App · 없으면 User-Agent 로 짐작)');
+    ok(/"priming-ui": "로이판"/.test(A) && /"priming-member": "판매판"/.test(A) && /"priming-order": "2\.0판 · Priming 무인 제작"/.test(A) && /"adonai-gongbang": "2\.0판 · 아도나이공방"/.test(A) && /"ua:python"/.test(A), '프로그램 이름표 = 로이판 · 판매판 · 2.0판(머리 X-Priming-App · 없으면 User-Agent 로 짐작 · v1.0.46)');
     ok(/_TTS_NOW\.update\(\{"key": _me_key/.test(A) && /_TTS_LAST\[_me_key\] = time\.time\(\)/.test(A), '합성 입구가 지금 음성을 만드는 쪽을 기록한다');
     const CF = A.slice(A.indexOf('def _comfy_free_if_idle'), A.indexOf('def _wait_vram_or_defer'));
     ok(/_comfy_queue_n\(\) > 0/.test(CF) && /"\/free"/.test(CF) && /unload_models/.test(CF) && /_comfy_free_if_idle\(free\)/.test(A), 'VRAM 이 모자라면 그림 사이에서 쉬는 ComfyUI 만 모델을 내려놓게 한다(서로 기다림 방지)');
@@ -142,7 +142,8 @@ print(json.dumps(out))
   ok(/^[\x20-\x7e]+$/.test(GS.procHeaders()['X-Priming-App']), '이름표 머리는 ASCII(Node fetch 가 한글 머리를 거부한다)');
   {
     const T = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'gpu-tray', 'GpuTray.cs'), 'utf8');
-    ok(!/"로이 렌더/.test(T) &&/img_users/.test(T) && /tts_user/.test(T) && /GPU Engine/.test(T), '트레이 = 서버의 PC·프로그램 + 실제 프로세스 사용률(⛔ 그림이 돌면 무조건 「로이 렌더」)');
+    ok(!/"로이 렌더/.test(T) && /img_users/.test(T) && /tts_user/.test(T) && /GPU Engine/.test(T), '트레이 = 서버의 PC·프로그램 + 실제 프로세스 사용률(⛔ 그림이 돌면 무조건 「로이 렌더」)');
+    ok(/"로이판\(개발 실행\)"/.test(T) && /return "판매판"/.test(T) && /"2\.0판 · 아도나이공방"/.test(T) && /electron-order/.test(T), '트레이 「실제」 줄도 같은 판 이름(로이판 · 판매판 · 2.0판 — 설치 경로 · 무인 제작 저장 공간 · 2.0 폴더로 가른다)');
   }
   ok(GS.isLocalBaseUrl('http://127.0.0.1:8188') && GS.isLocalBaseUrl('http://localhost:9881'), '루프백 = 로컬');
   ok(GS.isLocalBaseUrl('http://DESKTOP-ABC:8188', { hostname: 'desktop-abc', addrs: [] }), '이 PC 이름 = 로컬(대소문자 무시)');

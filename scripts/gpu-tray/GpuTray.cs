@@ -1,5 +1,6 @@
 // 🚦 GPU 사용자 표시기 (v1.0.15 · 로이 2026-11-04) — 작업표시줄 알림 영역에 「지금 GPU 를 누가 쓰나」.
-//   상태 색: 원격 PC(보라) · 이 PC(초록) · 우리 서버 밖의 프로그램(주황) · 쉬는 중(회색)
+//   상태 색: 원격 PC(보라) · 이 PC 우리 프로그램(초록) · 우리 것 아님(주황 — 브라우저 등) · 쉬는 중(회색)
+//   🏷 v1.0.46(로이 2026-11-07): 프로그램 이름 = 로이판 · 판매판 · 2.0판(서버 _APP_NAMES · 이 파일 EditionOf 두 곳이 같은 이름)
 //   👥 v1.0.45(로이 2026-11-06 「안 쓰는데 내가 쓴다고 나온다」): 옛판은 ComfyUI 에 그림이 하나라도 돌면 누구 것이든
 //      「로이 렌더(프라이밍)」으로 보였다 → 음성·그림 줄마다 서버가 받은 「어느 PC · 어떤 프로그램」을 쓰고,
 //      「실제:」 줄에 윈도우 성능 카운터로 잰 프로세스별 GPU 사용률을 함께 보인다. 오른쪽 클릭 「자세히 보기」.
@@ -191,9 +192,9 @@ static class GpuTray
     static Dictionary<string, PerformanceCounter> engCtr = new Dictionary<string, PerformanceCounter>();
     static Dictionary<int, string> nameCache = new Dictionary<int, string>();
 
-    static void TopGpuProcs(out string top, out int topPct)
+    static void TopGpuProcs(out string top, out int topPct, out bool topOurs)
     {
-        top = ""; topPct = 0;
+        top = ""; topPct = 0; topOurs = false;
         try
         {
             var cat = new PerformanceCounterCategory("GPU Engine");
@@ -220,39 +221,90 @@ static class GpuTray
             foreach (var kv in list)
             {
                 if (kv.Value < 5 || parts.Count >= 2) break;
-                if (parts.Count == 0) topPct = (int)Math.Round(kv.Value);
-                parts.Add(ProcName(kv.Key) + " " + Math.Round(Math.Min(100, kv.Value)) + "%");
+                var pi = ProcInfo(kv.Key);
+                if (parts.Count == 0) { topPct = (int)Math.Round(kv.Value); topOurs = pi.Value; }
+                parts.Add(pi.Key + " " + Math.Round(Math.Min(100, kv.Value)) + "%");
             }
             top = string.Join(", ", parts);
         }
         catch { }
     }
 
-    static string ProcName(int pid)
+    // 🏷 프로세스 → (이름, 우리 프로그램인가) — 판 이름은 로이판 · 판매판 · 2.0판(v1.0.46 · 로이 2026-11-07)
+    //   로이판 = 설치본 `Programs\priming\Priming.exe` · 개발 실행 `D:\Priming\node_modules\electron`
+    //   판매판 = `Programs\priming-member…\Priming 판매판.exe` · 데이터 `PrimingMember`
+    //   2.0판  = 무인 제작(Priming `--order` · 저장 공간 `electron-order`) · `D:\## 아도나이로이 2.0\…` 의 도구(아도나이공방 · 지휘자 · 주문 돌리기)
+    //   영상 굽기(ffmpeg)·업스케일은 부모 프로세스의 판을 따른다. 공용 서버(ComfyUI · 음성 · 보이스디자인)는 「우리 것」이고 누가 시켰는지는 음성·그림 줄이 말한다.
+    static Dictionary<int, KeyValuePair<string, bool>> infoCache = new Dictionary<int, KeyValuePair<string, bool>>();
+
+    static void Wmi(int pid, out string exe, out string cmd, out int parent)
     {
-        string s;
-        if (nameCache.TryGetValue(pid, out s)) return s;
-        string name = "pid " + pid, cmd = "";
-        try { name = Process.GetProcessById(pid).ProcessName; } catch { }
+        exe = ""; cmd = ""; parent = 0;
         try
         {
-            using (var q = new System.Management.ManagementObjectSearcher("SELECT CommandLine FROM Win32_Process WHERE ProcessId=" + pid))
-                foreach (System.Management.ManagementObject o in q.Get()) cmd = (o["CommandLine"] ?? "").ToString().ToLowerInvariant();
+            using (var q = new System.Management.ManagementObjectSearcher("SELECT ExecutablePath, CommandLine, ParentProcessId FROM Win32_Process WHERE ProcessId=" + pid))
+                foreach (System.Management.ManagementObject o in q.Get())
+                {
+                    exe = (o["ExecutablePath"] ?? "").ToString().ToLowerInvariant();
+                    cmd = (o["CommandLine"] ?? "").ToString().ToLowerInvariant();
+                    parent = Convert.ToInt32(o["ParentProcessId"] ?? 0);
+                }
         }
         catch { }
-        string label;
-        if (cmd.Contains("comfy")) label = "ComfyUI(그림)";
+    }
+
+    // 판 이름만(우리 Priming·2.0 도구가 아니면 null)
+    public static string EditionOf(string exe, string cmd)
+    {
+        string a = exe + " " + cmd;
+        if (a.Contains("아도나이로이 2.0") || a.Contains("electron-order") || a.Contains("--order") || a.Contains("주문/제작") || a.Contains("주문\\제작"))
+        {
+            if (a.Contains("아도나이공방")) return "2.0판 · 아도나이공방";
+            if (a.Contains("지휘자")) return "2.0판 · 지휘자";
+            if (a.Contains("electron") || a.Contains("priming")) return "2.0판 · Priming 무인 제작";
+            return "2.0판";
+        }
+        if (a.Contains("priming-member") || a.Contains("판매판") || a.Contains("primingmember")) return "판매판";
+        if (a.Contains("priming-smoke")) return "로이판(시험)";
+        if (exe.Contains("\\programs\\priming\\") || a.Contains("d:\\priming\\node_modules\\electron")) return a.Contains("node_modules\\electron") ? "로이판(개발 실행)" : "로이판";
+        return null;
+    }
+
+    static KeyValuePair<string, bool> ProcInfo(int pid)
+    {
+        KeyValuePair<string, bool> s;
+        if (infoCache.TryGetValue(pid, out s)) return s;
+        string name = "pid " + pid;
+        try { name = Process.GetProcessById(pid).ProcessName; } catch { }
+        string ln = name.ToLowerInvariant();
+        string exe, cmd; int parent;
+        Wmi(pid, out exe, out cmd, out parent);
+        string ed = EditionOf(exe, cmd);
+        string label; bool ours = true;
+        if (cmd.Contains("comfy")) label = "ComfyUI(그림 서버)";
         else if (cmd.Contains("start_server.pyw") || cmd.Contains("omnivoice")) label = "음성 서버";
-        else if (cmd.Contains("qwen_design")) label = "보이스디자인";
-        else if (cmd.Contains("realesrgan") || name.ToLowerInvariant().Contains("realesrgan")) label = "업스케일";
-        else if (name.ToLowerInvariant() == "ffmpeg") label = "ffmpeg(영상 굽기)";
-        else if (name.ToLowerInvariant() == "dwm") label = "윈도우 화면";
-        else if (name.ToLowerInvariant() == "ego" || name.ToLowerInvariant() == "chrome" || name.ToLowerInvariant() == "msedge") label = name + " 브라우저";
-        else if (name.ToLowerInvariant() == "electron" || name.ToLowerInvariant() == "priming") label = "Priming";
-        else if (name.ToLowerInvariant().StartsWith("pythonw") && cmd.Length == 0) label = "파이썬(관리자 · 음성 서버로 보임)";
-        else label = name;
-        nameCache[pid] = label;
-        return label;
+        else if (cmd.Contains("qwen_design")) label = "보이스디자인 서버";
+        else if (ln == "ffmpeg" || ln.Contains("realesrgan"))
+        {
+            string pexe, pcmd; int pp;   // 부모(대개 Priming)의 판을 따른다 — 두 단계까지
+            Wmi(parent, out pexe, out pcmd, out pp);
+            string ped = EditionOf(pexe, pcmd);
+            if (ped == null) { Wmi(pp, out pexe, out pcmd, out pp); ped = EditionOf(pexe, pcmd); }
+            label = (ln == "ffmpeg" ? "영상 굽기" : "업스케일") + (ped != null ? " · " + ped : "");
+            ours = ped != null;
+        }
+        else if (ed != null) label = ed;
+        else if (ln.StartsWith("pythonw") && cmd.Length == 0) label = "파이썬(관리자 권한 · 음성 서버로 보임)";
+        else
+        {
+            ours = false;
+            if (ln == "dwm") label = "윈도우 화면 그리기";
+            else if (ln == "ego" || ln == "chrome" || ln == "msedge" || ln == "firefox" || ln == "whale") label = name + " 브라우저";
+            else label = name;
+        }
+        s = new KeyValuePair<string, bool>(label, ours);
+        infoCache[pid] = s;
+        return s;
     }
 
     static string lastDetail = "";
@@ -268,8 +320,8 @@ static class GpuTray
         var comfy = GetJson(COMFY, false);
         int util, mu, mt;
         Smi(out util, out mu, out mt);
-        string top; int topPct;
-        TopGpuProcs(out top, out topPct);
+        string top; int topPct; bool topOurs;
+        TopGpuProcs(out top, out topPct, out topOurs);
 
         int waitR = Num(omni, "wait_remote"), waitL = Num(omni, "wait_local"), busy = Num(omni, "busy");
         int comfyRun = Len(comfy, "queue_running"), comfyWait = Len(comfy, "queue_pending");
@@ -295,12 +347,16 @@ static class GpuTray
         else if (comfyRun > 0) image = "그림: ComfyUI 작업 중 · 보낸 쪽 모름(신호 없음)";
         else image = "그림: 쉼";
 
+        // 머리 — 원격(보라) > 이 PC 우리 것(초록: 서버 요청 · ComfyUI 작업 · 「실제」 1등이 우리 판) > 우리 것 아님(주황) > 쉼(회색)
         string head;
-        if (anyRemote) { state = "remote"; otherStreak = 0; }
-        else if (anyLocal || comfyRun > 0) { state = "local"; otherStreak = 0; }
-        else if (util >= OTHER_UTIL && ++otherStreak >= 2) state = "other";
-        else { if (util < OTHER_UTIL) otherStreak = 0; state = "idle"; }
-        head = state == "other" ? "GPU: 우리 서버 밖의 프로그램" : state == "idle" ? "GPU: 쉬는 중" : "GPU 사용 중";
+        string topName = top.Length > 0 ? top.Split(',')[0] : "";
+        int sp = topName.LastIndexOf(' ');
+        if (sp > 0) topName = topName.Substring(0, sp);
+        if (anyRemote) { state = "remote"; otherStreak = 0; head = "GPU: 원격 PC 사용 중"; }
+        else if (anyLocal || comfyRun > 0) { state = "local"; otherStreak = 0; head = "GPU: 이 PC 우리 프로그램"; }
+        else if (topPct >= 5 && topOurs) { state = "local"; otherStreak = 0; head = "GPU: " + topName; }
+        else if (util >= OTHER_UTIL && ++otherStreak >= 2) { state = "other"; head = "GPU: 우리 것 아님" + (topName.Length > 0 ? "(" + topName + ")" : ""); }
+        else { if (util < OTHER_UTIL) otherStreak = 0; state = "idle"; head = "GPU: 쉬는 중"; }
 
         string l2 = util >= 0 ? string.Format("사용률 {0}% · VRAM {1:0.0}/{2:0}GB", util, mu / 1024.0, mt / 1024.0) : "nvidia-smi 못 읽음";
         string lTop = top.Length > 0 ? "실제: " + top : "실제: GPU 쓰는 프로세스 없음";
@@ -309,7 +365,9 @@ static class GpuTray
 
         tip = head + " · " + l2 + "\n" + voice + "\n" + image + "\n" + lTop;
         lastDetail = head + "\n" + l2 + "\n\n" + voice + "\n" + image + "\n\n" + lTop + "\n" + lWait
-            + "\n\n※ 음성·그림 줄 = 음성 서버가 받은 요청의 보낸 PC·프로그램\n※ 실제 = 윈도우가 잰 프로세스별 GPU 사용률";
+            + "\n\n※ 음성·그림 줄 = 음성 서버가 받은 요청의 보낸 PC·프로그램"
+            + "\n※ 실제 = 윈도우가 잰 프로세스별 GPU 사용률(우리 것 = 로이판 · 판매판 · 2.0판 · 공용 서버)"
+            + "\n※ 「우리 것 아님」 = 브라우저 · 윈도우 화면 등 — 음성·그림 작업과 상관없다";
     }
 
     // NotifyIcon.Text 는 .NET 에서 63자로 막혀 있지만 윈도우는 127자까지 보여 준다 — 내부 필드로 넣는다(실패하면 63자로 자른다).
