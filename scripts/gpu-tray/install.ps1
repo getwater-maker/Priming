@@ -14,7 +14,7 @@ Get-Process GpuTray -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 
 & $csc /nologo /target:winexe /codepage:65001 /optimize+ "/out:$exe" `
-  /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll $src
+  /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll /r:System.Management.dll $src
 if ($LASTEXITCODE -ne 0) { throw "빌드 실패 ($LASTEXITCODE)" }
 
 $startup = [Environment]::GetFolderPath('Startup')

@@ -77,7 +77,15 @@ function procId() {
   }
   return _proc;
 }
-function procHeaders() { return { 'X-Priming-Proc': procId() }; }
+// 🏷 X-Priming-App = 사람에게 보일 프로그램 종류(v1.0.45 · 로이 2026-11-06 「누가·어떤 프로그램이 쓰는지 정확하게」) —
+//   음성 서버 /gpu-status 가 트레이 표시기에 「이 PC · Priming 무인 제작」처럼 알려 준다. ⛔ 머리 값은 ASCII 만(Node fetch 가 한글을 거부한다).
+function appCode(env = (typeof process !== 'undefined' && process.env) || {}, edition) {
+  if (env.PM_HEADLESS) return 'priming-order';
+  let ed = edition;
+  if (!ed) { try { ed = require('./edition').EDITION; } catch (_) { ed = 'studio'; } }
+  return ed === 'member' ? 'priming-member' : 'priming-ui';
+}
+function procHeaders() { return { 'X-Priming-Proc': procId(), 'X-Priming-App': appCode() }; }
 
 /**
  * 🎙 이 GPU 의 음성이 「정말 끝났나」 — 서버 /busy 가 **연이어 조용할 때만** 끝난 것으로 본다(v1.0.42).
@@ -125,4 +133,4 @@ function addYield(sec, kind = 'tts') { const v = Number(sec) || 0; if (v > 0) _y
 function yieldStats() { return { image: _yield.image, tts: _yield.tts, total: _yield.image + _yield.tts }; }
 function resetYield() { _yield.image = 0; _yield.tts = 0; }
 
-module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle, waitTtsQuiet, procId, procHeaders, addYield, yieldStats, resetYield };
+module.exports = { isLocalBaseUrl, remoteActive, waitRemoteIdle, waitTtsQuiet, procId, procHeaders, appCode, addYield, yieldStats, resetYield };
