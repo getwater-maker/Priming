@@ -6,9 +6,9 @@
  *   기준(한 곳):
  *   - ② 클립 = **지금 음성을 만드는 문장**(sent.cur). TTS 가 끝났으면 그림(없으면 영상)을 만드는 그룹의 첫 문장.
  *       클립 칸은 문장(글·음성)을 보는 곳이다.
- *   - ① 미리보기 = **방금 완성된 그림·영상의 그룹**(영상 > 그림). 아직 완성된 것이 없으면 지금 만드는 그룹.
- *       그림·영상 단계가 없으면(음성만) ② 와 같은 곳. 미리보기는 결과 그림을 확인하는 곳이다.
- *   예) TTS 100번 문장 · 이미지 G2 진행 · G1 완성 → ② = 100번 문장 · ① = G1.
+ *   - ① 미리보기 = **② 와 같은 곳** — 지금 작업 중인 클립의 그림·영상(v1.0.43 · 로이 2026-11-06).
+ *       ② 가 없을 때만 방금 완성된 그림·영상 그룹(영상 > 그림).
+ *   예) TTS 100번 문장 · 이미지 G2 진행 · G1 완성 → ② = 100번 문장 · ① = 100번 문장이 든 그룹.
  *
  *   「방금 완성」은 이전 스냅샷과 비교해 만든다(active 에서 빠진 그룹) — 메모리만.
  *   ⚠ core/*.js 는 렌더러 번들에 들어간다 — CJS 런타임 자기검사 금지(CLAUDE.md §7 자막).
@@ -45,13 +45,10 @@ function targets(state, prog) {
   if (running(S.tts) && sent.cur && sent.cur.ord != null) clip = { sn: sent.cur.sn != null ? sent.cur.sn : null, ord: sent.cur.ord };
   else if (img.length) clip = { sn: img[0].sn, group: img[0].num };
   else if (vid.length) clip = { sn: vid[0].sn, group: vid[0].num };
-  let preview = (state && (state.lastVid || state.lastImg)) || null;
-  if (!preview && img.length) preview = { sn: img[0].sn, group: img[0].num };
-  if (!preview && vid.length) preview = { sn: vid[0].sn, group: vid[0].num };
-  const visualStage = ['image', 'video'].some((k) => S[k] && S[k].state !== 'skip');
-  if (!preview && !visualStage) preview = clip;   // 🎤 음성만 — 미리보기도 지금 문장
   if (!clip && prog.focus) clip = prog.focus;
-  if (!preview && prog.focus) preview = prog.focus;
+  // ① 미리보기 = ② 와 같은 곳 — 지금 작업 중인 클립의 그림·영상(v1.0.43 · 로이 2026-11-06 · 옛 「방금 완성된 그룹 먼저」 폐기)
+  let preview = clip;
+  if (!preview) preview = (state && (state.lastVid || state.lastImg)) || null;
   return { clip, preview };
 }
 

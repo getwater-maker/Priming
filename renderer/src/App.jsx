@@ -4458,7 +4458,7 @@ export default function App() {
     if (top && mode === 'longform') pickMenu(top);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [makeProg, stageRun, mp4Prog, ytProg]);
-  // 📍 ⚡ 만들기 — 만드는 대본으로 옮기고, ① = 방금 완성된 그림·영상 그룹 · ② = 지금 음성을 만드는 문장(core/follow-target)
+  // 📍 ⚡ 만들기 — 만드는 대본으로 옮기고, ①·② = 지금 작업 중인 클립(음성 문장 · 그리는 그룹 — core/follow-target · v1.0.43)
   useEffect(() => {
     const P = makeProg, F = followRef.current;
     const clearNow = () => { if (F.nowEl) { try { F.nowEl.classList.remove('tts-now'); } catch (_) {} F.nowEl = null; } };
