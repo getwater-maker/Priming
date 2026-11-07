@@ -56,6 +56,8 @@ try {
   //   (2026-10-05 01:34 실측: 로이가 앱을 켜는 순간 테스트 앱이 꺼짐). ⚠ ~/.flow-app·~/.priming-maker 설정 파일은 여전히 같이 쓴다.
   const electronDir = process.env.PM_UI_SMOKE ? path.join(os.tmpdir(), 'priming-smoke-electron') : HEADLESS ? path.join(dataDir, 'electron-order') : path.join(dataDir, 'electron');
   app.setPath('userData', electronDir);
+  // 🩹 프로세스가 죽으면 덤프를 이 PC 에만 남긴다(<userData>/Crashpad · 어디로도 보내지 않음 · v1.0.47 — 화면 백지 원인 근거)
+  try { require('electron').crashReporter.start({ uploadToServer: false }); } catch (_) {}
   // 디스크/GPU 캐시 경로 고정 — "Unable to move the cache" 권한 경고 회피.
   app.commandLine.appendSwitch('disk-cache-dir', path.join(electronDir, 'cache'));
 } catch (_) {}

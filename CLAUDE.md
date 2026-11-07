@@ -154,6 +154,7 @@
 - 🌙 모니터 끄기 감시(v0.5.102): 켜짐은 **전원 기록(566)의 새 RecordId**로 본다(입력 시각 API 는 137초 HID 켜짐을 못 본다 — 실측). **사람 = 키보드(31) 또는 커서 이동일 때만**, 그 밖은 다시 끈다(이유를 못 읽어도 사람으로 치지 않는다) · 8시간·최대 400회. 이 PC 는 끈 지 ~137초에 HID 보고로 켜지고 윈도우 화면 꺼짐 180초 순환(DP 모니터·커서 이동 아님).
 - 헤더 버전 표시는 앞 「0.」을 뺀다(`v6.22`) — package.json 은 0.x.y 그대로. 🔢 **패치가 100 을 넘기기 전에 마이너를 올린다**(0.6.0 부터 · 헤더가 패치를 두 자리까지만 보여 5.113 이 5.11 로 잘렸다).
 - 🌐 **롱폼/출판은 「세계」가 따로다**(v0.5.103 · `core/world-ctx.js`): `S.parsed·scriptPath·outRoot·preset·mode` 는 **호출이 시작된 세계**의 칸을 읽는다(AsyncLocalStorage). 새 IPC 는 기본이 **롱폼**, `book-*`·`open-book-*` 는 출판, 큐·모드·폴더처럼 화면을 따를 것만 `VIEW_FOLLOW_CHANNELS` 에 넣는다(렌더러가 여러 번 나눠 부르는 제작 루프는 `__world` 를 명시). 화면으로 DTO 를 밀 땐 `pushDtoUpdate`(보는 세계만 보냄)를 쓰고, 렌더러 `setDto` 는 다른 세계 DTO 를 버린다. ⛔ `S.mode = …` 를 세계 전환 용도로 새로 쓰지 말 것(열기 핸들러는 `WORLD.setView`). `npm run test:world`.
+- 🩹 **화면(렌더러) 프로세스가 죽으면 main `_guardRenderer`(`core/renderer-guard`)가 이유·화면 메모리를 로그에 적고 다시 띄운다**(v1.0.47 · 제작 도중 백지 사고 · 덤프 `~/.priming-maker/electron/Crashpad`) — 다시 띄운 화면은 `list-queue` 로 상태를 되받으므로 ⛔ 화면만 가진 상태를 새로 만들지 말 것 · `test:rendguard`.
 - 🔴 **`pushDtoUpdate`(전체 DTO 생성·전송)를 await 없는 반복 안에서 부르지 않는다** — 몰아서 끝에 한 번, 또는 1초 간격(`TTS_PROGRESS_GAP_MS`). 통합본 3,534문장 건너뛰기에서 응답없음(v0.5.84).
 - 🔴 **메인 프로세스에서 동기 자식 프로세스(`execFileSync`) 금지** — 이미지 검사로 앱이 54초 얼었다. 검사는 비동기 + 결과 기억(`_visMemo`) + 동시 4개.
 - G: 는 구글드라이브 스트리밍 — 순간 언마운트(16초)가 실제로 있었다. 쓰기·mkdir 은 `P.retryFs`(비동기 1·2·4·8·15초). ENOENT 도 일시 장애로 본다(쓰기 경로에서만).

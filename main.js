@@ -411,8 +411,10 @@ function createWindow() {
   });
   // 렌더러(React/Vite): dev 는 PM_DEV_URL(HMR 서버), prod 는 빌드된 정적 파일.
   const devUrl = process.env.PM_DEV_URL;
-  if (devUrl) { win.loadURL(devUrl); win.webContents.openDevTools({ mode: 'detach' }); }
-  else win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html'));
+  const loadUi = () => { if (devUrl) win.loadURL(devUrl); else win.loadFile(path.join(__dirname, 'renderer', 'dist', 'index.html')); };
+  loadUi();
+  if (devUrl) win.webContents.openDevTools({ mode: 'detach' });
+  _guardRenderer(win, loadUi);
 
   // 진단(PM_DIAG=1): 렌더러 콘솔/크래시를 stdout 으로 포워딩 후 자동 종료 — 스모크 검증용.
   if (process.env.PM_DIAG) {
@@ -430,6 +432,40 @@ function createWindow() {
       setTimeout(() => app.quit(), 2500);
     });
   }
+}
+
+// 🩹 화면(렌더러) 프로세스가 죽으면 기록하고 다시 띄운다(v1.0.47 · core/renderer-guard) — 본체의 제작은 그대로 계속된다.
+//   다시 띄운 화면은 시작 때처럼 list-queue 로 큐·대본을 본체에서 되받는다.
+//   화면 메모리를 5분마다 재 두었다가 죽을 때 함께 적는다(다음 사고의 원인 근거 — 메모리 부족인지).
+function _guardRenderer(w, loadUi) {
+  const RG = require('./core/renderer-guard');
+  let times = [], lastMem = null, peakMem = 0, warnedAt = 0;
+  const sample = () => {
+    try {
+      if (!w || w.isDestroyed()) return;
+      const mb = RG.rendererMemMB(app.getAppMetrics(), w.webContents.getOSProcessId());
+      if (mb == null) return;
+      lastMem = mb; if (mb > peakMem) peakMem = mb;
+      if (mb >= 3000 && Date.now() - warnedAt > 30 * 60 * 1000) { warnedAt = Date.now(); log(`⚠ 화면 메모리가 큽니다(${mb}MB) — 계속 늘면 화면이 멈출 수 있습니다`); }
+    } catch (_) {}
+  };
+  const timer = setInterval(sample, 5 * 60 * 1000);
+  w.on('closed', () => clearInterval(timer));
+  w.webContents.on('render-process-gone', (_e, d) => {
+    const reason = (d && d.reason) || '';
+    const r = RG.decide(times, Date.now(), reason);
+    times = r.times;
+    if (reason === 'clean-exit') return;
+    const mem = lastMem != null ? ` · 마지막 측정 화면 메모리 ${lastMem}MB(최대 ${peakMem}MB)` : '';
+    log(`🩹 화면 프로세스가 멈췄습니다 — ${RG.reasonKo(reason)}(${reason} · 코드 ${d && d.exitCode})${mem} · 진행 중인 작업은 계속됩니다`);
+    if (!r.reload) { log(`🩹 ${Math.round(RG.WINDOW_MS / 60000)}분 안에 화면이 ${RG.MAX_RELOADS}번 넘게 멈춰 다시 띄우기를 멈춥니다 — 앱을 다시 켜 주세요`); return; }
+    lastMem = null; peakMem = 0;
+    setTimeout(() => {
+      try { if (!w.isDestroyed()) { loadUi(); log('🩹 화면을 다시 띄웠습니다'); } } catch (e) { log(`🩹 화면 다시 띄우기 실패: ${e && e.message}`); }
+    }, 1000);
+  });
+  w.on('unresponsive', () => { sample(); log(`🩹 화면이 응답하지 않습니다${lastMem != null ? `(화면 메모리 ${lastMem}MB)` : ''} — 잠시 기다려 봅니다`); });
+  w.on('responsive', () => log('🩹 화면 응답이 돌아왔습니다'));
 }
 
 function _mimeOf(p) {
