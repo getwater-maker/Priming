@@ -1,5 +1,5 @@
 {
-  "version": "1.0.47",
+  "version": "1.0.48",
   "deps": "0a1409dd7b6c37e6b850a8223ac05d93b0380d94",
   "files": {
     "AGENTS.md": "4aef35128ba6a13a6c6a953579a26cb3449e3b9d",
@@ -22,7 +22,7 @@
     "assets/icon.ico": "a47476cc9f80c414a29faedadbe3652560feaa4d",
     "auto-updater.js": "7f0d3a183a25f3c9150002dc3c45d89257358384",
     "bootstrap.js": "f9add3d16123e0a22c2425eeff17cfed6f49204a",
-    "CLAUDE.md": "bb3c6963bae94a6ac47c00491192df6a7d052c2c",
+    "CLAUDE.md": "92866dcb9bafcefe66b1ce18fa195427994d0c32",
     "comfy/comfy-open.pyw": "ba4d3ec1316acefc8040196160c1688567517c06",
     "comfy/comfy-server.pyw": "4c6d1faf8853261bfdedaa2daeb620e9a7f555b7",
     "comfy/image_krea2_int4_turbo.json": "401ed24c8657d9cbf0056726dc200cafd085f31f",
@@ -288,7 +288,7 @@
     "docs/작업노트/2026-08.md": "063d00cf1ce67672d69cdb9fe8628b9ef15a9823",
     "docs/작업노트/2026-09.md": "2b17c1a6699d7ef8d8a2053845386fa2f4586112",
     "docs/작업노트/2026-10.md": "f7cb1e6f73bd9d580123ef52b37dea168da342de",
-    "docs/작업노트/2026-11.md": "8222dad077708b6f219c9328d146134a8576b695",
+    "docs/작업노트/2026-11.md": "e708f32bc8b755b99278681f4c042257836e227b",
     "docs/작업노트/초기.md": "ec3fd9f495a6b9849444761626d908ef4b9b5d63",
     "docs/재료권리_정리_2026-11-04.md": "5ef3e45cff994ff7c699be23c54481712c4696a9",
     "docs/참고-4K비디오다운로더플러스-분석.md": "c39fc380ecd852b59e8600416025be438b1e31c3",
@@ -307,7 +307,7 @@
     "light-updater.js": "06cbbc0f2f463ff21c24a6b3d73bfee01f95d4f3",
     "main.js": "9d7fab72bd634cd88d7a17d64289b0e49b626aa0",
     "package-lock.json": "4cfbf76e1a7b6c412a1f33a9dcd538eb5de43e32",
-    "package.json": "8972c8bda56f0b418535755af648a949e4d674b8",
+    "package.json": "46108f594e39832fca758891b6f7bbf3ea7c763c",
     "preload.js": "1a1b9e441a107cf9754474e33de6a11bfc7f7cc8",
     "renderer/dist/assets/index-B5zxex3A.css": "11f05057d1c7c9b33b16ad5826c420f33e205f53",
     "renderer/dist/assets/index-C3Z0Dx2p.js": "4c2f6962397842e26a1031c2c193a8b60887e5a0",

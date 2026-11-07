@@ -132,6 +132,10 @@ print(json.dumps(out))
     ok(/_note_app\(request\)/.test(A) && /def _who_status/.test(A) && /st\.update\(_who_status\(\)\)/.test(A), '/gpu-status 가 음성·그림을 쓰는 PC·프로그램을 알려 준다');
     ok(/"priming-ui": "로이판"/.test(A) && /"priming-member": "판매판"/.test(A) && /"priming-order": "2\.0판 · Priming 무인 제작"/.test(A) && /"adonai-gongbang": "2\.0판 · 아도나이공방"/.test(A) && /"ua:python"/.test(A), '프로그램 이름표 = 로이판 · 판매판 · 2.0판(머리 X-Priming-App · 없으면 User-Agent 로 짐작 · v1.0.46)');
     ok(/_TTS_NOW\.update\(\{"key": _me_key/.test(A) && /_TTS_LAST\[_me_key\] = time\.time\(\)/.test(A), '합성 입구가 지금 음성을 만드는 쪽을 기록한다');
+    // 🧹 내려놓기가 VRAM 을 다 돌려준다(v1.0.48 — lru_cache 가 오디오 토크나이저를 붙잡아 6.7GB 가 남았다)
+    const DR = A.slice(A.indexOf('def _drop_model_locked'), A.indexOf('def _clear_model_caches'));
+    ok(DR.indexOf('_clear_model_caches()') > -1 && DR.indexOf('_clear_model_caches()') < DR.indexOf('empty_cache()') && DR.indexOf('_cuda_clearCublasWorkspaces()') > -1 && DR.indexOf('_cuda_clearCublasWorkspaces()') < DR.indexOf('empty_cache()'), '내려놓기 = 라이브러리 캐시 → cuBLAS 작업 공간 → empty_cache 순');
+    ok(/def _clear_model_caches[\s\S]*?higgs_audio[\s\S]*?cache_clear\(\)/.test(A) && /@app\.get\("\/mem"\)/.test(A), 'higgs_audio·omnivoice 모듈의 lru_cache 를 비운다 · 진단 /mem');
     const CF = A.slice(A.indexOf('def _comfy_free_if_idle'), A.indexOf('def _wait_vram_or_defer'));
     ok(/_comfy_queue_n\(\) > 0/.test(CF) && /"\/free"/.test(CF) && /unload_models/.test(CF) && /_comfy_free_if_idle\(free\)/.test(A), 'VRAM 이 모자라면 그림 사이에서 쉬는 ComfyUI 만 모델을 내려놓게 한다(서로 기다림 방지)');
   } else console.log('  · 건너뜀');
