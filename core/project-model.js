@@ -133,7 +133,7 @@ class Group {
     this.promptEn = null;
     this.imagePrompt = null;            // 외부 AI(클로드) 생성 영어 이미지 프롬프트 (있으면 자동번역 대신 사용)
 
-    // Grok Imagine 비디오 변환 결과 (이미지 → 영상)
+    // 그룹 영상(이미지 → 영상 · AI 영상·ComfyUI i2v 결과)
     // videoPath 가 있으면 .vrew 가 이미지 대신 비디오 사용 (Ken Burns 대신 진짜 움직임)
     this.videoStatus = 'idle';          // idle | queued | generating | done | fail
     this.videoPath = null;

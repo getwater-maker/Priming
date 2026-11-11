@@ -137,7 +137,7 @@ function loadAll() {
             omni.isDefault = true;
           }
         }
-        // 🔁 ComfyUI·Genspark 이미지·비디오 도구 → AI 이미지·AI 영상(v0.9.92 · core/engine-migrate 한 곳) — 바꾼 내역은 main 이 로그로 남긴다
+        // 🔁 옛 이미지·비디오 도구(ComfyUI 등) → AI 이미지·AI 영상·「없음」(v0.9.92 · core/engine-migrate 한 곳) — 바꾼 내역은 main 이 로그로 남긴다
         let engMoved = 0;
         for (const p of data) {
           const ch = EM.migratePreset(p);

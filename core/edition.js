@@ -60,7 +60,7 @@ const FEATURES = {
   monitorOff:   { label: '🌙 모니터 끄기', editions: S, files: [], channels: [/^monitor-off$/] },
   qwenDesign:   { label: '🎨 보이스디자인', editions: S, files: ['core/qwen-design.js'], channels: [/qwen-design/] },
   omniServer:   { label: '🖧 메인 PC 음성 서버', editions: S, files: ['core/studio-env.js'] },
-  legacyEngines:{ label: '옛 엔진(Genspark·Grok·LoRA·Wan)', editions: S, files: ['genspark-engine.js', 'grok-engine.js', 'core/grok-api.js', 'core/lora-collect.js', 'Wan2.2 I2V/'], channels: [/lora-/] },
+  // (옛 브라우저 이미지·영상 엔진·LoRA 수집·Wan 워크플로 항목은 v1.0.49 에 코드와 함께 저장소에서 지웠다 — 두 판 모두에 없다)
 };
 // 판매판에 보내지 않는 내부 문서·도구(기능과 무관) — 단 앱 화면이 쓰는 「📘 대본 작성 기준」은 보낸다
 const MEMBER_DROP = [/^docs\//, /^CLAUDE\.md$/, /^AGENTS\.md$/, /^tools\//, /^test\//];

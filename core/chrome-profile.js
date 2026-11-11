@@ -3,7 +3,7 @@
 /**
  * chrome-profile.js — 자동화용 크롬 프로필 정리 + 실행 오류를 사람 말로.
  *
- * 🔴 배경(2026-08-26, 아내 PC 로그): Grok 이 정식 Chrome 실행에 실패하고
+ * 🔴 배경(2026-08-26, 아내 PC 로그): 그때의 브라우저 영상 엔진이 정식 Chrome 실행에 실패하고
  *   (`Target page, context or browser has been closed`) 번들 Chromium 폴백도
  *   `Executable doesn't exist at ...chromium-1223` 로 죽어 **G2 영상이 통째로 실패**했다.
  *   화면엔 영어 스택트레이스만 나와 무엇을 해야 하는지 알 수 없었다.
@@ -11,7 +11,7 @@
  * 🔑 원인 두 겹:
  *   ① 크롬이 비정상 종료하면 프로필의 `Preferences.exit_type = "Crashed"` 가 남아 다음 실행 때
  *      복원 안내가 뜨고 자동화 컨텍스트가 그대로 닫힌다. **Flow 경로만** 이걸 고치고 있었고
- *      (main.cleanChromeProfile) Grok·Genspark 는 Singleton 락만 지웠다.
+ *      (main.cleanChromeProfile) 다른 브라우저 엔진은 Singleton 락만 지웠다. (그 엔진들은 v1.0.49 에 지웠다 — 지금은 출판 자동 입력 등이 쓴다)
  *   ② 폴백용 Playwright 번들 Chromium 이 그 PC 에 안 깔려 있었다(설치는 사용자가 해야 한다).
  */
 
@@ -40,7 +40,7 @@ function cleanProfile(profileDir) {
 /**
  * 브라우저 실행 오류를 무엇을 해야 하는지가 보이는 한 줄로.
  * @param {Error} e
- * @param {string} who  'Grok' | 'Genspark' | 'Flow'
+ * @param {string} who  어느 자동화인지(로그·오류 글 앞에 붙는 이름 — 예: '부크크')
  */
 function explainLaunchError(e, who) {
   const raw = String((e && e.message) || e || '');

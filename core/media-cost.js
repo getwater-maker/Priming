@@ -22,7 +22,7 @@ function imageUnit(engine, comfyCloud) {
   if (isComfy(e)) return comfyCloud
     ? { kind: 'paid', usd: IMAGE_USD.comfyCloud, label: '클라우드 ComfyUI · 장당 약 $0.014(GPU 11초 실측 · 구독 크레딧에서 차감)' }
     : { kind: 'local', usd: 0, label: '로컬 ComfyUI · 전기료 외 무료' };
-  if (e === 'flow' || e === 'genspark') return { kind: 'sub', usd: 0, label: (e === 'flow' ? 'Flow' : 'Genspark') + ' 구독 요금제 안(장당 추가 비용 없음 · 일일 한도 있음)' };
+  if (e === 'flow') return { kind: 'sub', usd: 0, label: 'Flow 구독 요금제 안(장당 추가 비용 없음 · 일일 한도 있음)' };
   return { kind: 'unknown', usd: null, label: '요금 정보 없음' };
 }
 // 영상 한 편 단가
@@ -37,7 +37,7 @@ function videoUnit(engine, comfyCloud) {
   if (isComfy(e)) return comfyCloud
     ? { kind: 'paid', usd: VIDEO_USD.comfyCloud, label: '클라우드 ComfyUI · 편당 약 $0.11(GPU 90초 기준 추정 · 모델마다 다름)' }
     : { kind: 'local', usd: 0, label: '로컬 ComfyUI · 전기료 외 무료(편당 수십 분)' };
-  if (e === 'flow' || e === 'genspark') return { kind: 'sub', usd: 0, label: (e === 'flow' ? 'Flow(Veo)' : 'Genspark') + ' 구독 크레딧 소진(원화 비용 없음)' };
+  if (e === 'flow') return { kind: 'sub', usd: 0, label: 'Flow(Veo) 구독 크레딧 소진(원화 비용 없음)' };
   return { kind: 'unknown', usd: null, label: '요금 정보 없음' };
 }
 // 개수 × 단가 → 화면 글자. krw = 1달러의 원화.

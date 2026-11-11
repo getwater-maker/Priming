@@ -33,8 +33,8 @@ ok(/const _imgLocalGpu = isComfyVal\(engine\)/.test(SRC), '이미지 로컬 GPU 
   ok(body.length > 3000, 'runMakeAllCore 본문을 제대로 잘라냈다 (' + body.length + '자)');
   const code = body.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n'); // 주석 줄 제외
   ok(!/\bimgEngine\b/.test(code), 'runMakeAllCore 안에 스코프 밖 변수 imgEngine 이 없다');
-  // v0.9.92 — 인자는 `engine: _engineArg` 로 받고 옛 ComfyUI·Genspark 값을 바꾼 뒤 `engine` 으로 쓴다(core/engine-migrate)
-  ok(/\bengine: _engineArg = 'genspark'/.test(code) && /const engine = _migImg\(_engineArg\)/.test(code), 'runMakeAllCore 의 이미지 엔진 변수 이름은 engine(옛 값 변환 뒤)');
+  // v0.9.92 — 인자는 `engine: _engineArg` 로 받고 옛 도구 값을 바꾼 뒤 `engine` 으로 쓴다(core/engine-migrate)
+  ok(/\bengine: _engineArg = ''/.test(code) && /const engine = _migImg\(_engineArg\)/.test(code), 'runMakeAllCore 의 이미지 엔진 변수 이름은 engine(옛 값 변환 뒤)');
 }
 ok(/comfy-image'\)\.loadConfig\(\)\.cloud/.test(SRC), '이미지 설정의 cloud 를 실제로 읽는다');
 ok(/comfy-video'\)\.loadConfig\(\)\.cloud/.test(SRC), '비디오 설정의 cloud 를 실제로 읽는다');
@@ -64,7 +64,7 @@ ok(/_runOnLanes\(\['localGpu'\]/.test(SRC), '그 래퍼가 localGpu 레인을 �
 }
 ok(/const canParallel = !dry && !_imgLocalGpu/.test(SRC), 'canParallel 이 로컬 이미지를 배제한다');
 // ⚠ 화이트보드(✏ MP4)는 **그룹 이미지만** 쓴다 → 비디오를 아예 만들지 않는다(v0.5.12). 그래서 _wbTarget 이 끼어 있다.
-ok(/videoPipeline = _pipeBase && !_wbTarget && \(\(canParallel && grokVideoPipeline\) \|\| comfyVideoPipeline\)/.test(SRC),
+ok(/videoPipeline = _pipeBase && !_wbTarget && comfyVideoPipeline;/.test(SRC),
    '클라우드 비디오는 canParallel 과 무관하게 파이프라인 유지(단 화이트보드는 비디오 자체를 건너뛴다)');
 ok(/if \(videoPipeline && !canParallel && _imgLocalGpu\) \{/.test(SRC), '(TTS→이미지 순차) ∥ 비디오 분기 존재');
 ok(/await Promise\.all\(\[\(async \(\) => \{ await ttsStage\(\); if \(!S\.abort\) await imageStage\(\); \}\)\(\), videoStage\(\)\]\)/.test(SRC),
@@ -76,10 +76,9 @@ function decide({ imgEngine, imgCloud, videoEngine, vidCloud, dry = false }) {
   const isComfy = (v) => v === 'comfy' || String(v || '').indexOf('comfy::') === 0;
   const _imgLocalGpu = isComfy(imgEngine) && !imgCloud;
   const canParallel = !dry && !_imgLocalGpu;
-  const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
   const comfyVideoPipeline = isComfy(videoEngine) && !!vidCloud;
   const _pipeBase = !dry;
-  const videoPipeline = _pipeBase && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
+  const videoPipeline = _pipeBase && comfyVideoPipeline;
   const branch = (videoPipeline && !canParallel && _imgLocalGpu) ? 'tts→img ∥ video'
     : videoPipeline ? 'tts ∥ img ∥ video'
     : canParallel ? 'tts ∥ img' : 'tts → img';
@@ -97,20 +96,16 @@ eq(d.canParallel, false, '  이미지는 TTS 와 병렬로 안 돈다');
 d = decide({ imgEngine: 'comfy::krea2', imgCloud: true, videoEngine: 'comfy::ltx', vidCloud: true });
 eq(d.branch, 'tts ∥ img ∥ video', '둘 다 클라우드 → 전면 병렬(기존 동작 유지)');
 
-// 순환(브라우저) 이미지 + 클라우드 비디오 = 전면 병렬
-d = decide({ imgEngine: 'rotate', videoEngine: 'comfy::ltx', vidCloud: true });
-eq(d.branch, 'tts ∥ img ∥ video', '순환 이미지 → 로컬 GPU 안 쓰므로 전면 병렬');
+// AI 이미지(원격) + 클라우드 비디오 = 전면 병렬
+d = decide({ imgEngine: 'kie:qwen-2-1', videoEngine: 'comfy::ltx', vidCloud: true });
+eq(d.branch, 'tts ∥ img ∥ video', 'AI 이미지 → 로컬 GPU 안 쓰므로 전면 병렬');
 
-// 나노바나나(API) 이미지 + Grok 비디오 = 전면 병렬(기존)
-d = decide({ imgEngine: 'gemini', videoEngine: 'grok' });
-eq(d.branch, 'tts ∥ img ∥ video', 'API 이미지 + Grok → 전면 병렬(기존 동작)');
-
-// 이미지 로컬 + Grok 비디오 → Grok 은 canParallel 에 묶여 파이프라인 제외 → 완전 순차
-d = decide({ imgEngine: 'comfy::krea2', imgCloud: false, videoEngine: 'grok' });
-eq(d.branch, 'tts → img', '이미지 로컬 + Grok → 완전 순차(브라우저·GPU 충돌 회피)');
+// AI 이미지 + AI 영상 = 영상은 파이프라인 밖(3단계 일괄) · TTS ∥ 이미지
+d = decide({ imgEngine: 'kie:qwen-2-1', videoEngine: 'kie:minimax-h3' });
+eq(d.branch, 'tts ∥ img', 'AI 이미지 + AI 영상 → TTS ∥ 이미지, 영상은 3단계');
 
 // 비디오가 로컬 comfy = 파이프라인 제외(로컬 GPU 충돌)
-d = decide({ imgEngine: 'rotate', videoEngine: 'comfy::ltx', vidCloud: false });
+d = decide({ imgEngine: 'kie:qwen-2-1', videoEngine: 'comfy::ltx', vidCloud: false });
 eq(d.branch, 'tts ∥ img', '비디오 로컬 → 비디오는 순차 3단계로');
 
 // 이미지·비디오 **둘 다 로컬** = 3060 하나를 세 작업이 다툰다 → 완전 순차

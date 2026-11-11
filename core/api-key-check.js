@@ -3,7 +3,6 @@
  * api-key-check.js — 🔑 API 키 검증(⚙ 설정 → 🔑 API 키 · 2026-10-06 로이)
  *   저장하거나 쓰기 전에 「이 키가 지금 통하는가」를 확인한다. **읽기 전용 · 무료** 호출만 쓴다(요금이 드는 생성·합성 호출 없음):
  *     gemini-image / gemini   GET /v1beta/models/<모델>  (모델을 모르면 목록 1개)   — 🍌 나노바나나(이미지) 키 / Gemini TTS(음성) 키 — v0.9.32 부터 따로
- *     xai        GET /v1/api-key                                       — Grok API(비디오)
  *     mai        GET https://<지역>.tts.speech.microsoft.com/cognitiveservices/voices/list   — Azure Speech 키 + **지역**
  *     typecast   GET /v2/voices?model=ssfm-v30
  *     elevenlabs GET /v2/voices?page_size=1                            — Voices 읽기 권한이 없으면 「키는 맞지만 권한 부족」
@@ -56,16 +55,6 @@ async function verify(id, key, o = {}, fetchImpl) {
       if (r.status === 404 && model) return warn(`${L} 키는 맞지만 모델 「${model}」 을 찾지 못했습니다(404) — 모델명을 확인하세요`);
       return generic(r, L);
     }
-    if (id === 'xai') {
-      const r = await http('https://api.x.ai/v1/api-key', { Authorization: 'Bearer ' + k }, fetchImpl);
-      if (r.status === 200) {
-        const j = r.json || {};
-        if (j.api_key_blocked || j.team_blocked || j.disabled) return warn('xAI 키는 맞지만 차단/비활성 상태입니다 — console.x.ai 에서 확인하세요');
-        return good('xAI(Grok) 키 통과' + (j.name ? ` · ${j.name}` : ''));
-      }
-      if (r.status === 400 || r.status === 401 || r.status === 403) return bad(`xAI 키가 거부됐습니다(${r.status}) — 키를 다시 확인하세요`);
-      return generic(r, 'xAI');
-    }
     if (id === 'mai') {
       const region = String(o.region || 'eastus').trim() || 'eastus';
       if (!/^[a-z0-9]+$/i.test(region)) return bad('지역 이름이 이상합니다');
@@ -117,4 +106,4 @@ async function verify(id, key, o = {}, fetchImpl) {
   }
 }
 
-module.exports = { verify, ids: ['gemini', 'gemini-image', 'xai', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude', 'kie'] };
+module.exports = { verify, ids: ['gemini', 'gemini-image', 'mai', 'typecast', 'elevenlabs', 'pexels', 'pixabay', 'claude', 'kie'] };

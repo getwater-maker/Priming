@@ -1,6 +1,7 @@
 # Priming — 작업 컨텍스트 노트
 
 > 다음 AI(또는 사람)가 5분 안에 컨텍스트를 복원하기 위한 노트.
+> ⚠ 아래 기록 중 Genspark·Grok·Flow 브라우저 엔진(`genspark-engine`·`grok-engine`·`flow-engine`·`generateImagesGenspark`·`generateHookVideosGrok`)은 **지운 코드다**(Flow v0.9.67 · 나머지 v1.0.49) — 옛 경위로만 읽는다. 지금 규칙은 CLAUDE.md.
 
 ## 프로젝트 한 줄 요약
 **롱폼(16:9) 영상 제작** Electron 앱. 대본(.md) → TTS·이미지·(선택)비디오 → **Vrew 4.0.1 .vrew 파일**

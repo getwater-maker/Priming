@@ -123,7 +123,7 @@ const KA = require('../core/kie-api');
   ok(/isKieVal\(startEngine\)\) return runKieImages/.test(main) && /isKieVal\(videoEngine\)\) \{ await runKieVideos/.test(main), 'main: 이미지·비디오 단계가 kie 로 간다');
   ok(/'kie-key-get'/.test(main) && /'kie-key-save'/.test(main) && /kieKeyGet/.test(fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8')), '키 저장 IPC');
   ok((app.match(/<EngineOptions kind="image"/g) || []).length === 2 && (app.match(/<EngineOptions kind="video"/g) || []).length === 2, '헤더·채널 편집 두 곳이 같은 목록(EngineOptions)');
-  ok(!/<option value="flow">/.test(app) && !/<option value="genspark">/.test(app) && !/<option value="gemini-batch">/.test(app), '옛 항목(Flow·Genspark·나노바나나)은 목록에서 빠짐');
+  ok(!/<option value="flow">/.test(app) && !/<option value="gemini-batch">/.test(app) && !Object.keys(require('../core/engine-migrate').LEGACY_LABEL).some((v) => app.includes('<option value="' + v + '">')), '옛 항목(Flow·지운 브라우저 엔진·나노바나나)은 목록에서 빠짐');
   ok(/data-testid="kie-key"/.test(app), '⚙ 설정 → 🔑 API 키에 kie 칸');
   ok(!/require\.main/.test(fs.readFileSync(path.join(__dirname, '..', 'core', 'kie-models.js'), 'utf8')), 'kie-models 는 렌더러 번들 안전(CJS 자기검사 없음)');
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

@@ -26,7 +26,7 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
   ok(Math.abs(MC.imageUnit('gemini-batch', false).usd - 0.0168) < 1e-9, '배치 = 즉시의 절반 $0.0168');
   ok(MC.imageUnit('gemini-batch', false).usd * 2 === MC.imageUnit('gemini', false).usd, '배치 = 즉시의 정확히 절반(판정력)');
   ok(MC.imageUnit('comfy::x.json', false).kind === 'local' && MC.imageUnit('comfy::x.json', true).kind === 'paid', 'ComfyUI 로컬 = 무료 · 클라우드 = 유료');
-  ok(MC.imageUnit('flow', false).kind === 'sub' && MC.imageUnit('genspark', false).kind === 'sub', 'Flow·Genspark = 구독');
+  ok(MC.imageUnit('flow', false).kind === 'sub', 'Flow = 구독');
   ok(MC.videoUnit('none', false) === null && MC.videoUnit('', false) === null, '영상 없음 = 표시 안 함');
   ok(MC.costText(MC.imageUnit('gemini', false), 10, 1400) === '470원 · 10개', '10장 즉시 = 470원 (10×0.0336×1400): ' + MC.costText(MC.imageUnit('gemini', false), 10, 1400));
   ok(MC.costText(MC.imageUnit('gemini', false), 0, 1400) === '남은 것 없음', '남은 것이 없으면 그렇게 표시');

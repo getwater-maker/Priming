@@ -156,7 +156,7 @@ const TEXTBOX_DUMMY_BIN = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.
 const TEXTBOX_DUMMY_META = path.join(__dirname, 'dummy', 'uc-0010-simple-textbox.meta.json');
 
 // mp4 헤더(moov/trak/tkhd/mvhd) 직접 파싱 — width/height/duration 추출.
-// grok-store 추정값(1280x720) 이 실제 영상(예: 1280x704) 과 어긋나면 Vrew 가
+// 추정값(1280x720) 이 실제 영상(예: 1280x704) 과 어긋나면 Vrew 가
 // 메타와 실제 frame 차이만큼 흰 letterbox 띠를 그리므로 정확한 값이 필요.
 // 이미지 실제 픽셀 크기 (PNG/JPEG 헤더 파싱, 의존성 없음). 실패 시 null.
 function readImageSize(p) {
@@ -179,7 +179,7 @@ function readImageSize(p) {
   } catch { return null; }
 }
 
-// ffmpeg -i 로 해상도/길이 추출 — moov 가 파일 끝에 있는 mp4(ffmpeg 인코딩/업스케일·Grok 출력 등)
+// ffmpeg -i 로 해상도/길이 추출 — moov 가 파일 끝에 있는 mp4(ffmpeg 인코딩/업스케일 출력 등)
 // 에서 헤더 박스 파싱이 실패할 때의 신뢰 폴백.
 function ffmpegVideoMeta(filePath) {
   if (!_ffmpegPath || !fs.existsSync(_ffmpegPath)) return null;
@@ -914,9 +914,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const _transByTrack = {};   // 🎬 trackId → {type, sec} — .vrew 는 담지 못해 옆 파일(<이름>.vrew.fx.json)로 렌더러에 넘긴다
   for (const g of groups) {
     // (a) 비디오가 있으면 비디오 자산 + video/videoAudio 두 트랙 생성 (음소거)
-    //     9:16 쇼츠 캔버스: 세로 영상만 사용(가로 16:9 그록영상은 흰 여백 → 이미지 폴백).
+    //     9:16 쇼츠 캔버스: 세로 영상만 사용(가로 16:9 영상은 흰 여백 → 이미지 폴백).
     //     16:9 롱폼: 영상 있으면 그대로 사용.
-    //     (Shots-maker: Grok이 _aspectRatio='9:16'로 세로 영상을 내므로 훅 컷 애니메이션 반영됨)
     if (g.videoPath && fs.existsSync(g.videoPath)) {
       // 🎞 영상이 그룹 음성보다 짧으면 **그룹 길이에 맞춘 파일**을 넣는다(core/video-fit.js — 차이가 작으면 느리게,
       //   크면 반복 + 이음새 크로스페이드). 전엔 🎬 MP4 가 남는 시간 동안 마지막 프레임에서 멈췄다(2026-09-24).
@@ -972,7 +971,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         if (realMeta.duration > 0) dur = realMeta.duration;
         log(`[Vrew] mp4 메타: ${path.basename(_vsrc)} ${videoWidth}x${videoHeight}, ${dur.toFixed(2)}초`);
       } else {
-        // mp4 헤더 파싱 실패 시 기본값(Grok 720p 16:9) 사용
+        // mp4 헤더 파싱 실패 시 기본값(720p 16:9) 사용
         videoWidth = 1280; videoHeight = 720; dur = 5;
         log(`[Vrew] mp4 헤더 파싱 실패 — 기본값 사용: ${videoWidth}x${videoHeight}, ${dur}초`);
       }
@@ -997,7 +996,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       // (사용자가 Vrew 에서 수동으로 하던 "영상 키우고 가운데 정렬" 자동화)
       //
       // 비율 차이: 영상(예: 1280x704=1.818) ↔ 화면 16:9(=1.778) ≈ 2.3%
-      // 5% 마진(이전 값)이면 letterbox 자체는 가려지지만 Grok 출력의 영상 마지막
+      // 5% 마진(이전 값)이면 letterbox 자체는 가려지지만 옛 브라우저 영상 엔진 출력의 마지막
       // 1~2픽셀 row 가 흰색 인코딩 artifact 로 남는 케이스 발견 → 사용자가 화면
       // 하단에 얇은 흰 줄을 봤음. 8% 마진으로 늘려서 가장자리 픽셀까지 화면 밖으로
       // 밀어냄 (각 변 4%씩 잘림 — 영상 중앙 콘텐츠는 그대로 보존).

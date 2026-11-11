@@ -245,11 +245,12 @@ function ComfyEngineOptions({ cfg, kind = 'image', value = '' }) {
 }
 // 🧩 ② 이미지 · ③ 비디오 도구 목록(v0.9.66 · 로이 2026-10-17 「장기적으로 kie 하나로 운영」) — **헤더·채널 편집이 이 하나를 쓴다**
 //   이미지 = 🖥 Qwen-Image 2.1 Turbo(로컬) → kie 이미지 모델 · 비디오 = ☁ MiniMax H3 레퍼런스(R2V) → kie 비디오 모델 → 없음.
-//   Flow·Genspark·나노바나나·다른 ComfyUI 워크플로는 목록에서 뺐다(코드는 남김) — 저장된 값이 그것이면 「(옛 설정) …」으로 그대로 보이고 그대로 돈다
+//   Flow·나노바나나·다른 ComfyUI 워크플로는 목록에서 뺐다(코드는 남김) — 저장된 값이 그것이면 「(옛 설정) …」으로 그대로 보이고 그대로 돈다
 //   (일치하는 option 이 없으면 드롭다운이 빈칸이 되고, 조용히 다른 엔진으로 바꾸면 요금이 바뀐다).
 const QWEN_LOCAL_WF_RE = /image_qwen21_turbo\.json$/i;
 const MM_R2V_WF_RE = /video_minimax_h3_ref2v_cloud\.json$/i;
-const LEGACY_ENGINE_LABEL = { flow: 'Flow (구독)', genspark: 'Genspark (구독)', gemini: '나노바나나 2.1 즉시', 'gemini-batch': '나노바나나 2.1 배치', 'grok-api': 'Grok API', grok: 'Grok', grok10: 'Grok 10초' };
+// 지운 옛 도구의 이름표는 core/engine-migrate 의 LEGACY_LABEL 한 곳(이름을 화면에 다시 두지 않는다)
+const LEGACY_ENGINE_LABEL = { ...EM.LEGACY_LABEL, flow: 'Flow (구독)', gemini: '나노바나나 2.1 즉시', 'gemini-batch': '나노바나나 2.1 배치' };
 function legacyEngineLabel(v, cfg) {
   const c = parseComfyVal(v);
   if (c) { const w = comfyWorkflows(cfg).find((x) => x.path === c.path); return `${c.cloud ? '☁' : '🖥'} ${w ? wfLabel(w) : (String(c.path).split(/[\\/]/).pop() || 'ComfyUI')}`; }
@@ -361,12 +362,9 @@ function phaseBadge(p) {
   return ['', p];   // 섹션 제목 그대로 (키워드 축약 안 함 — '본론 진입'이 '본론'으로 잘못 표시되던 문제)
 }
 
-// 🎬 Genspark 비디오 모델 — genspark-engine.js 의 GENSPARK_VIDEO_MODELS 와 **같아야 한다**
-//   (렌더러는 require 를 못 쓴다. 테스트가 두 목록의 이름을 대조해 어긋남을 막는다.)
-// 🎬 Grok(구독·API) 비디오 항목은 헤더·채널 목록에서 뺐다(2026-10-07 로이). 예전에 저장된 값(grok·grok10·grok-api·wan)은 「없음(이미지만)」으로 읽는다 —
-//   조용히 다른 유료 엔진(Flow·Veo)으로 넘어가 크레딧을 쓰지 않게.
-const normVideoEngine = (v) => EM.migrateVideo(['grok', 'grok10', 'grok-api', 'wan'].includes(v) ? 'none' : v).v;
-// 🔁 ComfyUI·Genspark(옛 순환 rotate 포함)·빈 값 → AI 이미지(v0.9.92 · 로이 2026-10-21 「컴피유아이와 브라우저는 사용하지 않아」 · core/engine-migrate 한 곳 · 비디오도 위 normVideoEngine 이 같은 모듈)
+// 🎬 지운 옛 영상 도구 값은 「없음(이미지만)」으로 읽는다(core/engine-migrate 한 곳) — 조용히 다른 유료 엔진으로 넘어가 크레딧을 쓰지 않게.
+const normVideoEngine = (v) => EM.migrateVideo(v).v;
+// 🔁 옛 이미지 도구(ComfyUI · 옛 브라우저 순환)·빈 값 → AI 이미지(v0.9.92 · 로이 2026-10-21 「컴피유아이와 브라우저는 사용하지 않아」 · core/engine-migrate 한 곳 · 비디오도 위 normVideoEngine 이 같은 모듈)
 const normImgEngine = (v) => EM.migrateImage(v).v;
 // ⚙ 설정 탭(v0.9.92) — 판매자(owner) = 🔑 API 키 · 🖧 서버 · 📺 · 📁 · 👤 / 회원 = 🔑 · 📺 · 📁 · 👤 · 🎛 ComfyUI·🌐 브라우저 탭은 뺐다(로이 2026-10-21)
 // 🪙 회원 포인트로 AI 이미지·영상을 대신 부르는 서버 대행이 붙었는가 — 붙으면 true 로(회원 🔑 API 키 맨 위 안내 문구가 바뀐다 · v0.9.92)
@@ -377,28 +375,6 @@ const SETTINGS_TAB_ALIAS = (tab, owner) => {
   return SETTINGS_TABS(owner).some(([id]) => id === t) ? t : 'keys';
 };
 const SCRIPT_STYLE_ID = '__script__';   // 📜 이미지 스타일 목록의 「대본스타일」 — main.js 의 SCRIPT_STYLE_ID 와 같은 값
-const GS_VIDEO_MODELS = [
-  { name: '모델 자동 선택', note: 'Genspark 이 고름 — 참조 이미지를 쓸지 알 수 없음', imgRef: null },
-  { name: 'Seedance 2.5', note: '4~30초 · 1080p · 이미지 30장', imgRef: true },
-  { name: 'Seedance v2', note: '4~15초 · 1080p · 이미지 9장', imgRef: true },
-  { name: 'MiniMax H3', note: '2K · 이미지 9장', imgRef: true },
-  { name: 'MiniMax H3 Max', note: '2K · 더 빠름 · 이미지 9장', imgRef: true },
-  { name: 'Wan 3.0', note: '2~30초 · 1080p · 이미지 10장', imgRef: true },
-  { name: 'Gemini Omni Flash', note: '3~10초 · 720p · ❌ 참조 이미지 안 받음(실사로 나옴)', imgRef: false },
-  { name: 'Grok Imagine Video', note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
-  { name: 'FLUX 3 Video', note: '5~20초 · 1080p · 이미지 10장', imgRef: true },
-  { name: 'PixVerse C1', note: '1~15초 · 1080p · 이미지 7장', imgRef: true },
-  { name: 'Kling V3', note: '3~15초 · 720p · 첫/마지막 프레임', imgRef: true },
-  { name: 'Happy Horse', note: '3~15초 · 720p/1080p · 이미지 9장', imgRef: true },
-  { name: 'Gemini Veo 3.1', note: '4·6·8초 · 최대 4K · 이미지 3장', imgRef: true },
-  { name: 'Gemini Veo 3', note: '4·6·8초 · 720p · ❌ 참조 이미지 안 받음', imgRef: false },
-  { name: 'Kling O3', note: '3~15초 · 720p · 이미지 1~4장 필요', imgRef: true },
-  { name: 'PixVerse V6', note: '5·8초 · 720p/1080p · ❌ 참조 이미지 안 받음', imgRef: false },
-  { name: 'Seedance Pro Fast', note: '5·10초 · 1080p · 첫/마지막 프레임', imgRef: true },
-  { name: 'Wan V2.7', note: '5초 · 480p/720p · ❌ 참조 이미지 안 받음', imgRef: false },
-  { name: 'Vidu Q3', note: '1~16초 · 1080p · 이미지 1~4장', imgRef: true },
-  { name: 'Runway', note: '5·10초 · 720p · 이미지 필요', imgRef: true },
-];
 const QSTATUS = { idle: '대기', running: '진행중', done: '완료', failed: '실패' };
 
 // ✏ 화이트보드 자막 기본값 — ⚠ core/whiteboard-subtitle.js 의 SUB_DEFAULTS·FONT_CANDIDATES 와 **같은 값**이어야 한다.
@@ -672,7 +648,7 @@ export default function App() {
   const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
-  const [imgEngine, setImgEngine] = useState(EM.IMG_DEFAULT); // 'kie:<모델>'(v0.9.66 · 기본 = AI 이미지 Qwen-Image 2.1 · v0.9.92) | 옛 'comfy[::경로]' | 옛 'genspark'|'flow'(브라우저 · 각 서비스 구독제 · 한도면 서로 이어받고 재설정 후 되돌아옴)|'gemini'|'comfy[::경로]'
+  const [imgEngine, setImgEngine] = useState(EM.IMG_DEFAULT); // 'kie:<모델>'(v0.9.66 · 기본 = AI 이미지 Qwen-Image 2.1 · v0.9.92) | 옛 'comfy[::경로]' | 옛 'flow' | 'gemini' (그 밖의 옛 값은 core/engine-migrate 가 바꾼다)
   const [videoEngine, setVideoEngine] = useState('none'); // 비디오 제작 도구 — 기본 「없음(이미지만)」
   const [vidFrom, setVidFrom] = useState(1);   // I2V 범위 시작 그룹
   const [vidTo, setVidTo] = useState(1);        // I2V 범위 끝 그룹 (롱폼 기본=도입부 끝)
@@ -754,8 +730,6 @@ export default function App() {
     return () => { clearTimeout(t1); clearInterval(t2); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [gsCool, setGsCool] = useState(null); // Genspark 한도 쿨다운 {until, label} — 재설정 시각(재시작해도 유지)
-  const [grokCool, setGrokCool] = useState(null); // Grok(영상) 한도 쿨다운 {until, label}
   const [comfyOpen, setComfyOpen] = useState(false);
   const [comfyCfg, setComfyCfg] = useState(null); // ComfyUI(z-image) 설정
   const [comfyView, setComfyView] = useState(null); // ⚙ ComfyUI 탭 보기(☁/🖥) — null = 이미지가 지금 쓰는 쪽(v0.9.38 · 보기만 · 저장 안 함)
@@ -828,11 +802,6 @@ export default function App() {
   })() : null;
   const [appFolders, setAppFolders] = useState({ reader: '', download: '', def: '' });   // 📁 모든 채널 공통 폴더(⚙ 설정 → 📁 폴더)
   const [settingsTab, setSettingsTab] = useState('keys');   // SETTINGS_TABS 의 id — 'keys' | 'server'(판매자) | 'yt' | 'folders' | 'account' (v0.9.92 · 옛 comfy·flow 는 SETTINGS_TAB_ALIAS)
-  const [acctOpen, setAcctOpen] = useState(false);              // Flow 탭 안의 「👤 계정 관리」 펼침(옛 계정 탭)
-  // 👤 계정 탭 — {genspark|flow|grok: {dailyCap, accounts:[{id,label,used,creds,login}]}}
-  const [acct, setAcct] = useState(null);
-  const [acctEdit, setAcctEdit] = useState({});   // 입력 중인 아이디/비번 (비번은 저장 후 즉시 비움)
-  const [credsOk, setCredsOk] = useState(true);   // OS 암호화 가능 여부
   const [findRes, setFindRes] = useState({ active: 0, total: 0 });
   const findTimerRef = useRef(null);                     // 검색 디바운스 타이머
   // 🔴 큐 순회용 중단 플래그 — main 의 S.abort 는 렌더러가 볼 수 없어서, 큐 루프가 중단을 모른 채
@@ -1038,14 +1007,9 @@ export default function App() {
   const [ttsEngActive, setTtsEngActive] = useState({ id: 'omnivoice', label: 'OmniVoice' }); // 헤더 버튼 표시
   const [promptView, setPromptView] = useState(null);   // 그룹 프롬프트 보기 { label, image, video, motion }
   const [finalPrompt, setFinalPrompt] = useState(null); // 실제 전송되는 최종 프롬프트(스타일·네거티브 포함) — main 이 계산
-  const [imgRot, setImgRot] = useState(null);            // { order:[], enabled:{} } 이미지 순환 설정
-  // 🎛 Genspark 비디오 모델 — 헤더 select 와 ⚙ 설정 select 가 **같은 저장값**(imgRot.gensparkVideoModel)을 쓴다.
-  //   두 곳이 각자 값을 들면 어긋난다(v0.3.50·v0.3.76 계열). 실행 IPC 에도 이 값을 실어 보낸다(헤더 우선).
-  const gsVideoModel = (imgRot && imgRot.gensparkVideoModel) || 'MiniMax H3 Max';
   const [upCfg, setUpCfg] = useState(null);              // 영상 업스케일 방식 { mode, slowLimitSec }
   const [giCfg, setGiCfg] = useState(null);              // Nano Banana 2 Lite (Gemini 이미지 API) 설정
   const [giKey, setGiKey] = useState('');                // 🍌 나노바나나(이미지) 전용 Gemini 키 — secret-store 'gemini-image'(TTS 'gemini' 와 따로 · v0.9.32)
-  const [xaiVal, setXaiVal] = useState('');              // xAI(Grok API) 키 — 통합 설정 팝업 '키' 탭
   // 🔊 TTS API 키(⚙ 설정 → 🔑 API 키 · v0.6.78 — 키는 여기 한 곳에서) — info = {엔진: {has, tail}} · 입력값은 저장 뒤 비운다(원문을 들고 있지 않는다)
   const [ttsKeys, setTtsKeys] = useState({ info: {}, draft: {}, region: 'eastus', msg: '' });
   // 🔑 API 키 검증 결과 — { [id]: { busy, level: ok|warn|bad, message } } (읽기 전용·무료 호출 · 방금 붙여넣은 키 우선, 없으면 저장된 키)
@@ -1091,7 +1055,6 @@ export default function App() {
   const [ttsSrvOpen, setTtsSrvOpen] = useState(false);   // TTS 서버 주소(OmniVoice) 설정 모달
   const [ttsSrv, setTtsSrv] = useState({ omnivoice: { baseUrl: '' } });
   const [nameAsk, setNameAsk] = useState(null);          // 이름 입력 모달 { title, value, resolve } — window.prompt 대체(Electron 미지원)
-  const [lora, setLora] = useState(null);                // LoRA 수집 설정 { enabled, dir, trigger, count }
 
   const logRef = useRef(null);
   const previewAudioRef = useRef(null);   // 미리듣기 오디오 1개만 재생(새로 누르면 이전 것 정지)
@@ -1161,8 +1124,6 @@ export default function App() {
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
     loadPresets().then(loadStyles);
-    // 🎛 브라우저 이미지·비디오 설정(Flow 모델·Genspark 비디오 모델)을 부팅 때 읽는다 — 헤더 select 가 쓴다.
-    api.getImageRotation().then((r) => { if (r) setImgRot(r); }).catch(() => {});
     api.getWhiteboardConfig().then((c) => { if (c) setWbCfg(c); }).catch(() => {});
     // 시작/재로드 시 큐 복원 — 지난 세션 큐 + 활성 대본 화면 복구
     api.listQueue().then((r) => {
@@ -1211,9 +1172,7 @@ export default function App() {
         setTtsSpeed(String(sp != null ? sp : (prof.defaultTtsSpeed != null ? prof.defaultTtsSpeed : 1.0)));
         setStyleId(st || p.styleId || 'chibi');
         setAiNotice(true); // AI 고지 기본값: ON (사용자가 토글로 변경)
-        // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 레거시값은 정규화.
-        //   옛 'rotate'(순환) → 'genspark'. 드롭다운이 Flow·Genspark 로 분리됐고(2026-08-26), 고른 쪽을
-        //   먼저 쓰고 한도면 다른 쪽이 이어받으므로 동작은 그대로다(activeOrder).
+        // 채널이 지정한 이미지·비디오 제작 도구를 헤더 기본값으로 (있을 때만). 옛 값은 core/engine-migrate 로 정규화.
         if (p.imgEngine != null) setImgEngine(normImgEngine(p.imgEngine));
         if (p.videoEngine != null) setVideoEngine(normVideoEngine(p.videoEngine));
         if (p.outTarget != null) setOutTarget(normOutTargetUi(p.outTarget));
@@ -1361,9 +1320,8 @@ export default function App() {
     if (s.presetName != null) setPresetName(s.presetName);
     if (s.styleId != null) setStyleId(s.styleId);
     if (s.ttsSpeed != null) setTtsSpeed(s.ttsSpeed);
-    // comfy(z-image/Krea2)·gemini·genspark·flow 는 유효 — 보존. 옛 'rotate' 만 genspark 로 이관.
+    // 옛 도구 값은 core/engine-migrate 가 AI 이미지·「없음」으로 바꾼다(normImgEngine·normVideoEngine)
     if (s.imgEngine != null) setImgEngine(normImgEngine(s.imgEngine));
-    // 제거된 영상 엔진(flow/wan)·레거시(grok10) → grok. comfy(::path)·grok-api 는 보존.
     if (s.videoEngine != null) setVideoEngine(normVideoEngine(s.videoEngine));
     if (s.vidFrom != null) setVidFrom(s.vidFrom);
     if (s.vidTo != null) setVidTo(s.vidTo);
@@ -1658,7 +1616,7 @@ export default function App() {
     if (!ensurePromptsFilled(shortsNum, { image: 'range', video: 'range' })) return; // 영상=범위 그룹 이미지+i2v
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`비디오 생성중(G${vidFrom}~${vidTo})…`);
-    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); setDto(d); setStatus('비디오 완료'); }
+    try { const d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: sid }); setDto(d); setStatus('비디오 완료'); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   // 이미지·비디오 일괄 삭제 — TTS 삭제(🗑)와 같은 방식. 파일 + 재활용 캐시까지 지워 다음 생성 때 새로 만든다.
@@ -1715,7 +1673,7 @@ export default function App() {
           const _sameCh = !_its.presetName || _its.presetName === presetName;
           if (ph === 'tts') { await api.ttsBuild({ __item: it.id, shortsNum: null, dry: false, presetName: _its.presetName || presetName || null, speed: (_sameCh ? ttsSpeed : (_its.ttsSpeed != null ? _its.ttsSpeed : ttsSpeed)) || null }); }
           if (ph === 'image') { await api.imageBuild({ __item: it.id, shortsNum: null, engine: imgEngine, styleId: qStyle, ...qFb, headerPresetName: presetName || null }); }
-          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: qStyle, ...qFb, headerPresetName: presetName || null }); }
+          if (ph === 'video' && videoEngine !== 'none') { await api.videoBuild({ __item: it.id, shortsNum: null, perItem: true /* 대본마다 자기 범위(저장값 → 도입부) — v0.5.73 */, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: qStyle, ...qFb, headerPresetName: presetName || null }); }
         } catch (e) { logline(`큐 ${plabel} 오류: ${e.message}`); queueAbortRef.current = true; break stageLoop; }
 
       }
@@ -1733,7 +1691,7 @@ export default function App() {
     setStatus('이미지→비디오 생성중…');
     try {
       let d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: sid }); if (d) setDto(d);
-      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); if (d) setDto(d); }
+      if (videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: sid }); if (d) setDto(d); }
       setStatus('이미지→비디오 완료');
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -1747,7 +1705,7 @@ export default function App() {
     try {
       let d = await api.ttsBuild({ shortsNum, dry: false, presetName: presetName || null, speed: ttsSpeed || null }); if (d) setDto(d);
       d = await api.imageBuild({ shortsNum, engine: imgEngine, styleId: sid }); if (d) setDto(d);
-      if (withVid && videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); if (d) setDto(d); }
+      if (withVid && videoEngine !== 'none') { d = await api.videoBuild({ shortsNum, fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: sid }); if (d) setDto(d); }
       setStatus(`${lbl} 완료`);
     } catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
@@ -1758,7 +1716,7 @@ export default function App() {
       shortsNum, engine: imgEngine, presetName: presetName || null, speed: ttsSpeed || null,
       captionStyle: capOverride(), captionMaxChars: effCap, styleId: styleId || null,
       fromNum: parseInt(vidFrom, 10) || 1, toNum: parseInt(vidTo, 10) || 1, vidSel,
-      dry: false, videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel,
+      dry: false, videoEngine, flowVideoModel, flowCount,
       aiNotice, // 사용자 선택(작업바 토글)
       outMode: effOutMode(),  // 전체 / 음성만 / 화면만 (화이트보드는 늘 전체)
       outTarget, // .vrew / ✏ 화이트보드 MP4
@@ -1820,7 +1778,7 @@ export default function App() {
       //   폴백으로 쓰인다. 안 보내면 서버가 getPreset(null)=기본 채널로 떨어져 **엉뚱한 목소리**로 합성된다
       //   (2026-08-31 실사고: 대본 4개를 한 번에 열면 마지막 1개만 presetName 이 저장돼 있었다).
       // 영상 범위는 공통으로 보내지 않는다 — main 이 대본마다 자기 범위(저장값 → 도입부)를 쓴다(v0.5.73).
-      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, styleId: batchStyle, ...batchFb, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
+      const r = await api.runBatch({ plan, common: { captionStyle: capOverride(), captionMaxChars: effCap, videoEngine, imgEngine, flowVideoModel, flowCount, styleId: batchStyle, ...batchFb, presetName: presetName || null, ttsSpeed: ttsSpeed != null ? ttsSpeed : null, outTarget, aiNotice, outMode: effOutMode(), uploadAfter: uploadArg }, openEach: openEachVrew });
       if (r && r.queue) setQueue(r.queue);
       if (r && r.dto) { setDto(r.dto); setFtitle(r.dto.fileTitle || ''); }
       setStatus(r && r.aborted ? '⏹ 제작 중단됨 — 다시 만들면 미완료 작업부터 이어갑니다' : r && r.failed ? '⚠ 제작 미완료 — 문제를 해결한 뒤 만들기를 누르면 이 작업부터 재개합니다' : r && r.stoppedEarly ? `⏸ 이번 편까지 만들고 멈춤 — 남은 ${r.remaining}편은 ⚡ 만들기를 다시 누르면 이어서 만듭니다` : '⚡⚡ 큐 제작 완료');
@@ -1892,7 +1850,7 @@ export default function App() {
     followNow();
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
     setStatus(`G${groupNum} 비디오…`);
-    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, gensparkVideoModel: gsVideoModel, imgEngine, styleId: sid }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
+    try { const d = await api.videoGroup({ shortsNum, groupNum, engine: videoEngine, flowVideoModel, flowCount, imgEngine, styleId: sid }); setDto(d); setStatus(`G${groupNum} 비디오 완료`); }
     catch (e) { logline('오류: ' + e.message); setStatus('오류'); }
   }
   function playFrom(shortsNum, groupNum, start, tag, force) {
@@ -2374,9 +2332,6 @@ export default function App() {
   async function saveUpCfg(patch) { try { setUpCfg(await api.setUpscaleConfig(patch)); } catch (e) { logline('업스케일 설정 오류: ' + e.message); } }
   async function saveGiCfg(patch) { try { setGiCfg(await api.setGeminiImageConfig(patch)); } catch (e) { logline('나노바나나 설정 오류: ' + e.message); } }
   async function saveGiKey(k) { try { await api.setGeminiKey(k || ''); setGiKey(k || ''); setStatus('🍌 나노바나나(이미지) Gemini 키 저장됨'); } catch (e) { logline('Gemini 키 저장 오류: ' + e.message); } }
-  async function saveLora(patch) { try { setLora(await api.setLoraCollect(patch)); } catch (e) { logline('LoRA 설정 오류: ' + e.message); } }
-  async function pickLoraDir() { try { const r = await api.pickLoraDir(); if (r) setLora(r); } catch (e) { logline(e.message); } }
-  async function saveImgRot(next) { setImgRot(next); try { await api.setImageRotation(next); } catch (e) { logline('순환 저장 오류: ' + e.message); } }
   // ✏ 화이트보드 — 설정 저장 · 장면 계획(관문 A 만) · 렌더(관문 A→B→렌더)
   async function saveWbCfg(patch) {
     const next = { ...(wbCfg || {}), ...patch }; setWbCfg(next);
@@ -3010,7 +2965,6 @@ export default function App() {
       setStatus(msg); setSettingsMsg(msg);
     } catch (e) { logline(e.message); setSettingsMsg('❌ 오류: ' + e.message); }
   }
-  // Grok API(비디오) xAI 키
   // ─── 🔊 채널 목소리 팝업(TtsEngineDialog.jsx · v0.6.69 채널별) — 여기는 열기·닫기·헤더 표시만 ───
   //   헤더 버튼 = 지금 채널(presetName)의 목소리 얼굴 + 엔진·목소리 이름
   async function refreshTtsEngActive() {
@@ -3118,7 +3072,7 @@ export default function App() {
     await loadTtsKeys();
     setTtsKeys((x) => ({ ...x, draft: { ...x.draft, [id]: '' }, msg: r && r.ok ? (patch.clear ? '🔑 키를 지웠습니다' : '🔑 저장했습니다') : '❌ 저장 실패' }));
   }
-  // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini·xAI 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
+  // 🔴 반드시 openSettings('keys') 로 연다 — 그냥 열면 위 🍌 Gemini 칸이 빈 채로 떠서, 칸을 눌렀다 나가면(onBlur) **빈 키로 저장**된다
   async function openTtsKeySettings() { setTtsEng(null); await openSettings('keys'); }
   useEffect(() => { if (settingsOpen && settingsTab === 'keys') { loadTtsKeys(); loadStockKeys(); loadClaudeKey(); loadKieKey(); } /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [settingsOpen, settingsTab]);
   // 💰 TTS 예상 비용(원) — 지금 대본 · 채널 목소리 엔진 단가 · 음성 없는 문장만(TTS 는 있는 문장을 건너뛴다)
@@ -5507,16 +5461,6 @@ export default function App() {
   }
   // 자막 옵션 변경 시 재생 중이면 즉시 반영
   useEffect(() => { if (playerOpen) applyCaptionStyle(); /* eslint-disable-next-line */ }, [capPos, capFine, capAlign, capSize, capYAlign, playerOpen]);
-  // Genspark 한도 쿨다운(재설정 시각) — 마운트 시 + 60초마다 조회. 저장값(json)을 읽으므로 앱 재시작해도 유지.
-  useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      api.gensparkCooldown().then((r) => { if (alive) setGsCool(r); }).catch(() => {});
-      api.grokCooldown().then((r) => { if (alive) setGrokCool(r); }).catch(() => {});
-    };
-    tick(); const iv = setInterval(tick, 60000);
-    return () => { alive = false; clearInterval(iv); };
-  }, []);
   // 화면 내 검색(Ctrl+F) — 모든 모드 공통. Electron find-in-page 로 렌더 텍스트 찾기·이동.
   useEffect(() => {
     // 🔴 검색창 자기 글자도 find-in-page 가 「찾은 글」로 잡아 입력창 글자를 통째로 선택(주황 강조)하고 포커스를 가져가
@@ -5729,77 +5673,7 @@ export default function App() {
       setCvidCfg(c);
     }).catch(() => {});
   }, []);
-  // ── 통합 설정 팝업 — ComfyUI 이미지·비디오 · API키(제미나이/나노바나나·xAI) · TTS서버를 한 곳에서(탭). ──
-  // ── 👤 계정 통합 관리 (⚙ 설정 → 계정 탭) — 2026-08-19 ───────────────────────
-  // Genspark · Flow · Grok 계정이 서로 다른 모달 3개에 흩어져 있던 것을 한 화면으로 모았다.
-  // 🔒 비밀번호는 저장만 하고 되돌려 받지 않는다(hasPassword 플래그만). OS 암호화(safeStorage).
-  const ACCT_SVCS = [
-    { id: 'genspark', icon: '🖼', name: 'Genspark', note: '이미지 생성 (순환 1번)' },
-    { id: 'grok', icon: '🎬', name: 'Grok (X)', note: '비디오 생성 (브라우저)' },
-  ];
-  const ACCT_API = {
-    genspark: { add: 'addGensparkAccount', rm: 'removeGensparkAccount', ren: 'renameGensparkAccount', cap: 'setGensparkCap', login: 'gensparkLogin' },
-    grok: { add: 'addGrokAccount', rm: 'removeGrokAccount', ren: 'renameGrokAccount', cap: 'setGrokCap', login: 'grokLogin' },
-  };
-  async function loadAcct() {
-    try {
-      const out = {};
-      for (const s of ACCT_SVCS) out[s.id] = await api.getAccountStatus(s.id);
-      setAcct(out);
-    } catch (e) { logline('계정 목록 오류: ' + e.message); }
-    try { setCredsOk(await api.credsAvailable()); } catch (_) { setCredsOk(false); }
-  }
-  async function acctDo(svc, fn, ...args) {
-    try { await api[ACCT_API[svc][fn]](...args); } catch (e) { logline(`계정 작업 오류: ${e.message}`); }
-    await loadAcct();
-  }
-  async function acctAdd(svc) {
-    const label = (await askName('새 계정 이름 (예: 채널A, 부계정)', '')) || '';
-    if (!label.trim()) return;
-    await acctDo(svc, 'add', label.trim());
-  }
-  async function acctRemove(svc, id, label) {
-    if (!(await uiConfirm(`계정 "${label}" 을 목록에서 지울까요?\n(브라우저 프로필·쿠키는 남습니다)`))) return;
-    try { await api.clearAccountCreds(svc, id); } catch (_) {}
-    await acctDo(svc, 'rm', id);
-  }
-  async function acctLogin(svc, id) {
-    setStatus(`${svc} 로그인 창 여는 중…`);
-    setSettingsMsg('⏳ 로그인 창이 열립니다. 저장된 아이디·비밀번호가 있으면 자동 입력되고, CAPTCHA·2단계 인증이 나오면 직접 마무리하세요.');
-    try {
-      const r = await api[ACCT_API[svc].login](id);
-      const msg = r && r.ok ? '✅ 로그인 완료 — 쿠키가 프로필에 저장됐습니다.' : `❌ 로그인 실패${r && r.error ? ` (${r.error})` : ''}`;
-      setStatus(msg); setSettingsMsg(msg);
-    } catch (e) { setSettingsMsg('❌ 오류: ' + e.message); }
-    await loadAcct();
-  }
-  async function acctSaveCreds(svc, id) {
-    const u = (acctEdit[`${svc}:${id}:u`] || '').trim();
-    const p = acctEdit[`${svc}:${id}:p`] || '';
-    if (!u && !p) { setSettingsMsg('⏳ 저장할 아이디·비밀번호를 입력하세요.'); return; }
-    try {
-      const r = await api.setAccountCreds(svc, id, u || undefined, p || undefined);
-      setSettingsMsg(r && r.ok ? '✅ 저장했습니다 (OS 암호화). 비밀번호는 화면에 다시 표시되지 않습니다.'
-        : `❌ 저장 실패${r && r.error ? ` — ${r.error}` : ''}`);
-      // 입력칸의 비밀번호는 즉시 비운다(화면에 남겨두지 않는다)
-      setAcctEdit((s) => ({ ...s, [`${svc}:${id}:p`]: '' }));
-    } catch (e) { setSettingsMsg('❌ 저장 오류: ' + e.message); }
-    await loadAcct();
-  }
-  async function acctClearCreds(svc, id) {
-    if (!(await uiConfirm('저장된 아이디·비밀번호를 지울까요?\n(로그인 쿠키는 그대로 남습니다)'))) return;
-    try { await api.clearAccountCreds(svc, id); setSettingsMsg('🔒 자격증명을 지웠습니다.'); } catch (e) { setSettingsMsg('❌ ' + e.message); }
-    await loadAcct();
-  }
-  // 로그인 흔적 표시 — 쿠키 파일 mtime 기준(브라우저를 띄우지 않는다)
-  function acctLoginLabel(a) {
-    const l = a.login || {};
-    if (!l.exists) return { t: '· 로그인 안 함', c: '#a08b6a' };
-    if (!l.cookieAt) return { t: '· 로그인 안 함', c: '#a08b6a' };
-    if (l.days <= 0) return { t: '· 오늘 사용', c: '#5a8a5a' };
-    if (l.days <= 30) return { t: `· ${l.days}일 전 사용`, c: '#5a8a5a' };
-    return { t: `· ${l.days}일 전 (만료됐을 수 있음)`, c: '#b0762a' };
-  }
+  // ── 통합 설정 팝업 — API 키 · 서버 · 채널 연결 · 폴더 · 계정을 한 곳에서(탭). ──
   // ⚙ 설정의 로컬/클라우드 램프 — { local:{ing|ok|error}, cloud:{…} }. 실측 결과만 담는다(설정은 안 바뀜).
   const [comfyProbe, setComfyProbe] = useState({});
   const [cvidProbe, setCvidProbe] = useState({});
@@ -5824,9 +5698,6 @@ export default function App() {
     //   음성 서버 주소·영상 업스케일은 판매자 전용 「🖧 서버」 탭으로 옮겼다 · 회원은 🔑 API 키로
     const tabId = SETTINGS_TAB_ALIAS(tab, owner);
     setSettingsTab(tabId);
-    // 🌐 브라우저 이미지 탭이 쓰는 값 — 순환(Flow 모델)·LoRA 수집. 실패해도 나머지 탭은 정상 동작.
-    try { setImgRot(await api.getImageRotation()); } catch (_) {}
-    try { setLora(await api.getLoraCollect()); } catch (_) {}
     try { setUpCfg(await api.getUpscaleConfig()); } catch (_) {}
     setSettingsMsg(''); // 지난 연결테스트 결과가 남아 오해하지 않게 초기화
     try {
@@ -5841,7 +5712,6 @@ export default function App() {
     } catch (_) {}
     try { setGiCfg(await api.getGeminiImageConfig()); } catch (_) {}
     try { setGiKey(await api.getGeminiKey() || ''); } catch (_) {}
-    try { setXaiVal(await api.getXaiKey() || ''); } catch (_) {}
     try { const c = await api.getTtsServers(); if (c && !c.error) setTtsSrv({ omnivoice: { baseUrl: (c.omnivoice && c.omnivoice.baseUrl) || '' } }); } catch (_) {}
     try { const q = await api.getQwenDesignConfig(); setVdSrv((q && q.baseUrl) || ''); } catch (_) {}
     // ⚙ 를 열면 로컬·클라우드 양쪽을 바로 찔러 본다 — "로컬이 꺼져 있는데 로컬로 보내고 있었다"를 미리 안다.
@@ -6504,13 +6374,6 @@ export default function App() {
                 💰 <b>{vidCost.txt}</b>{vidCost.q && <> · <span data-testid="vid-cost-q">큐 {vidCost.q.n}편 <b>{vidCost.q.txt}</b></span></>}
               </span>
             )}
-            {videoEngine === 'genspark' && (
-              <select style={{ maxWidth: 190 }} value={gsVideoModel}
-                title={`Genspark 비디오 모델 — 이 모델로 비디오를 만듭니다 (⚙ 설정의 값과 같은 것). ${((GS_VIDEO_MODELS.find((m) => m.name === gsVideoModel) || {}).note) || ''}`}
-                onChange={(e) => saveImgRot({ ...(imgRot || {}), gensparkVideoModel: e.target.value })}>
-                {GS_VIDEO_MODELS.map((m) => <option key={m.name} value={m.name} title={m.note}>{m.imgRef === false ? '❌ ' : ''}{m.name}</option>)}
-              </select>
-            )}
             {videoEngine === 'none'
               ? <span className="meta" title="비디오 없이 이미지만으로 .vrew 생성 (켄번스)">이미지만(켄번스)</span>
               : (<>
@@ -7124,18 +6987,6 @@ export default function App() {
             </nav>
           )}
           <span className="grow" />
-        {gsCool && gsCool.until > 0 && (
-          <span title={`Genspark 이미지가 구독 한도에 도달했습니다. 그 전까지는 Genspark 에 접속하지 않고 바로 Flow 로 만들고, 이 시각이 지나면 만들던 대본 도중이라도 자동으로 Genspark 로 되돌아가 남은 이미지를 이어서 만듭니다. 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: 'var(--bg-fde8e8,#fde8e8)', color: 'var(--fg-a3352b,#a3352b)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            🖼 젠스파크 이미지 생성가능시간: {fmtKoTime(gsCool.until)}
-          </span>
-        )}
-        {grokCool && grokCool.until > 0 && (
-          <span title={`Grok 영상이 한도에 도달했습니다. 이 시각 이후 재설정됩니다. 그 전까지는 Grok(브라우저) 영상 생성을 건너뛰고 이미지만 만듭니다(헛되이 브라우저를 띄우지 않음). 앱을 껐다 켜도 유지됩니다.`}
-            style={{ padding: '3px 9px', borderRadius: 6, background: 'var(--bg-e8eefd,#e8eefd)', color: 'var(--fg-2b45a3,#2b45a3)', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-            🎬 Grok 비디오 생성가능시간: {fmtKoTime(grokCool.until)}
-          </span>
-        )}
             {loaded && (
               <span className="autosave-ind" title="작업은 자동으로 수시 저장됩니다. 같은 대본을 다시 열면 이어서 작업할 수 있어요.">
                 {autoSavedAt ? `✓ 자동저장 ${new Date(autoSavedAt).toLocaleTimeString()}` : '자동저장 켜짐'}
@@ -7175,7 +7026,7 @@ export default function App() {
               {feat('remotion') && <button className={mode === 'remotion' ? 'active' : ''} onClick={() => switchMode('remotion')}>🎬 리모션</button>}
               {feat('book') && <button className={mode === 'book' ? 'active' : ''} onClick={() => switchMode('book')}>📖 출판</button>}
             </span>
-            <button className="ghost" title="통합 설정 — ComfyUI 이미지·비디오 연결/워크플로 · API 키(제미나이·나노바나나·Grok) · TTS 서버 주소 · 계정"
+            <button className="ghost" title="통합 설정 — API 키 · TTS 서버 주소 · 채널 연결 · 폴더 · 계정"
               style={{ padding: '6px 9px' }} onClick={() => openSettings(settingsTabForEngine())}>⚙<span className="lbl"> 설정</span></button>
             {isBk && (<>
               <button className="ghost" title="원고를 어떻게 작성하는지 규약 설명이 담긴 샘플 .md 저장 — 복사해서 내용만 바꾸면 바로 책이 됩니다" onClick={async () => { try { const r = await api.bookSaveGuide(); if (r) setStatus('가이드 저장: ' + r.path); } catch (e) { logline(e.message); } }}>📄 작성 가이드</button>
@@ -8769,12 +8620,12 @@ export default function App() {
               <Hint>보이스디자인은 <b>GPU 가 있는 메인 PC</b>에서 서버가 돕니다. 다른 PC 에서 쓰려면 위 칸에 <b>메인 PC 주소(포트 9893)</b>를 넣으세요.
                 {' '}메인 PC 에서는 <b>비워 두면</b> 창을 열 때 자동으로 서버가 켜집니다.<br /><br />입력 후 칸 밖을 클릭하면 저장됩니다. 「연결테스트」 = 그 주소의 /health 확인.</Hint>
               <div className="subhead" style={{ marginTop: 12 }}>🎞 영상</div>
-              {/* ⬆ 영상 업스케일 — Grok(720p) 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
+              {/* ⬆ 영상 업스케일 — 720p 등 저해상도 결과를 1080p 로. LTX2.5 는 처음부터 1920x1088 이라 자동 생략된다.
                   🔴 2026-08-26 아내 PC: NVIDIA GPU 가 없어 Real-ESRGAN 이 영상 하나에 수십 분 걸렸다. */}
               <div className="frow" style={{ alignItems: "center", marginTop: 6, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
                 <label style={{ flex: "0 0 auto", minWidth: 110 }}>영상 업스케일</label>
                 <select style={{ flex: "0 0 auto", width: "auto" }} value={(upCfg && upCfg.mode) || "auto"}
-                  title="저해상도 영상(Grok 720p 등)을 1080p 로 키우는 방식. 이미 1080p 이상이면 어느 방식이든 자동으로 건너뜁니다."
+                  title="저해상도 영상(720p 등)을 1080p 로 키우는 방식. 이미 1080p 이상이면 어느 방식이든 자동으로 건너뜁니다."
                   onChange={(e) => saveUpCfg({ mode: e.target.value })}>
                   <option value="auto">자동 (AI로 시작 · 너무 느리면 빠름으로)</option>
                   <option value="ai">AI 고정 (Real-ESRGAN · 화질 우선 · GPU 필요)</option>

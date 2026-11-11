@@ -5,7 +5,7 @@
 //   로그 실측으로 갈렸다. 같은 시각 두 번의 🔄 가 갈린 이유는 한도가 아니라 **영상 유무**였다:
 //     [23:36:00] [다산_0829] G1 (media-1 에 01.jpg 만) → 브라우저 띄우고 30초 걸려 ✓ 성공
 //     [23:36:38] [다산_0827] G1 (media-1 에 01.jpg + **01.mp4**) → **1초** 만에 ✗ 실패
-//   실패 쪽 로그엔 「[Genspark] 브라우저 시작」 이 **한 줄도 없다** — 대상이 0개라 그냥 빠져나온 것이다.
+//   실패 쪽 로그엔 (그때 이미지 엔진의) 「브라우저 시작」 이 **한 줄도 없다** — 대상이 0개라 그냥 빠져나온 것이다.
 //
 // 원인: 대상 필터가 !hasVisual(g) 인데 hasVisual 은 **videoPath 까지** 본다. 반면 재생성 경로는
 //   g.imagePath = null 만 지운다 → 영상이 있는 그룹은 「이미 자산 있음」으로 판정 → 0장 생성 후
@@ -80,9 +80,9 @@ ok(M.noTargetMsg([1, 3]).indexOf('그룹 1,3') >= 0, '여러 그룹도 적는다
 ok(M.noTargetMsg(null).indexOf('대상 없음') >= 0, '범위가 없어도 이유를 남긴다');
 ok(M.noTargetMsg(null).indexOf('그룹') < 0, '범위가 없으면 그룹 표기를 붙이지 않는다');
 
-console.log('[4] 배선 대조 — 네 엔진이 모두 같은 판정을 쓴다');
+console.log('[4] 배선 대조 — 세 엔진이 모두 같은 판정을 쓴다(runRotatingImages 는 이제 나눠 주기만 한다 · 옛 브라우저 순환은 v1.0.49 에 지웠다)');
+ok(MAIN.indexOf('async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {') >= 0, 'runRotatingImages(나눠 주기)가 force 를 받는다');
 const sigs = [
-  ['runRotatingImages', 'async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {'],
   ['runComfyImages', 'async function runComfyImages(project, imagesDir, logger, styleId, onlyNums, workflowPath, baseRetryLevel = 0, force = false) {'],
   ['runKieImages', 'async function runKieImages(project, imagesDir, logger, styleId, onlyNums, engine, force = false) {'],
   ['runGeminiImages', 'async function runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force = false) {'],
@@ -93,7 +93,6 @@ ok(MAIN.indexOf('!hasVisual(g) && (!onlyNums') < 0, '옛 필터(!hasVisual(g) &&
 ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, onlyNums, force)') >= 0, '순환→Gemini 위임에 force 전파');
 ok(MAIN.indexOf('comfyWfOf(startEngine), retryLevel, force)') >= 0, '순환→Comfy 위임에 force 전파');
 ok(MAIN.indexOf('runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force)') >= 0, '순환→AI 이미지 위임에 force 전파');
-ok(MAIN.indexOf('runGeminiImages(project, imagesDir, logger, styleId, nums, force)') >= 0, '순환 안 Gemini 호출에 force 전파');
 sigs.forEach(([name]) => ok(/noTargetMsg\(onlyNums\)|생성할 그룹 없음/.test(extractFn(MAIN, name)), name + ' 대상 0개 로그'));
 
 console.log('[5] 배선 대조 — force 를 켜는 곳(명시적 재생성 4곳)');
@@ -105,8 +104,8 @@ const forced = [
 ];
 forced.forEach(([label, code]) => ok(MAIN.indexOf(code) >= 0, label + ' 이 force=true'));
 // ⚠ 평소 경로는 force 를 켜지 않는다 — 켜면 영상 있는 그룹에 쓸데없이 이미지를 만든다.
-ok(MAIN.indexOf('runRotatingImages(pr, mediaDir, log, styleId, engine); // Flow+Genspark 순환(한도 시 자동 이어감)') >= 0, '만들기 2단계(수동 🖼)는 force 없음');
-ok(MAIN.indexOf('runRotatingImages(pr, dirs.media, log, styleId, engine); // Flow+Genspark 순환') >= 0, '만들기 파이프라인 2단계는 force 없음');
+ok(MAIN.indexOf('await runRotatingImages(pr, mediaDir, log, styleId, engine);\n') >= 0, '만들기 2단계(수동 🖼)는 force 없음');
+ok(MAIN.indexOf('await runRotatingImages(pr, dirs.media, log, styleId, engine);\n') >= 0, '만들기 파이프라인 2단계는 force 없음');
 ok(MAIN.indexOf('runRotatingImages(pr, videoDir, log, styleId, imgEngine, onlyNums);') >= 0, '영상 범위 생성 전 선행 이미지는 force 없음(영상 있는 그룹은 어차피 건너뛴다)');
 
 console.log('[6] 🔄 실패해도 원래 이미지를 잃지 않는다');
@@ -114,10 +113,8 @@ ok(MAIN.indexOf('const _prevImg = g.imagePath, _prevEng = g.imageEngine;') >= 0,
 ok(MAIN.includes('if (!canRestore || !fs.existsSync(_prevImg)) return;') && MAIN.includes('g.imagePath = _prevImg; g.imageEngine = _prevEng;') && MAIN.includes('restorePrevious();'), '실패 시 검증된 기존 이미지 참조 복원');
 ok(MAIN.indexOf('기존 이미지를 그대로 둡니다') >= 0, '복원했음을 로그로 알린다');
 
-console.log('[7] 회귀 — Genspark 는 원래부터 이미지 유무만 봤다(나머지를 그쪽에 맞춘 것)');
+console.log('[7] 회귀 — pipeline 은 그림 판정을 하지 않는다(판정은 main 의 hasVisual 한 곳)');
 const PIPE = fs.readFileSync(path.join(__dirname, '..', 'core', 'pipeline.js'), 'utf8');
-ok(PIPE.indexOf('!(groups[i].imagePath && fs.existsSync(groups[i].imagePath))') >= 0,
-  'generateImagesGenspark 는 videoPath 를 보지 않는다');
 ok(PIPE.indexOf('hasVisual') < 0, 'pipeline 에 hasVisual 판정이 새로 끼어들지 않았다');
 
 console.log('[8] 소스 위생');

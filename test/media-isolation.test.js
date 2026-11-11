@@ -85,12 +85,12 @@ function wav(samples, amp) {
     // 그룹 번호로 이름을 지어 **새로 쓰는** 자리: out/dest/base = path.join(<폴더>, …padStart…)
     const bare = (src) => src.split('\n').filter((l) => /\b(out|dest|base|outputPath)\s*=\s*path\.join\([^;]*padStart\(2, '0'\)/.test(l) && !/claimPath/.test(l));
     ok(bare(M).length === 0, `main.js — 번호 이름으로 바로 쓰는 자리 0 (${bare(M).map((l) => l.trim().slice(0, 60)).join(' | ') || '없음'})`);
-    ok(bare(PL).length === 0 && /outputPaths = idx\.map\(\(i\) => claimPath\(/.test(PL), 'pipeline.js — Genspark 이미지 · Grok 영상도 claimPath');
+    ok(bare(PL).length === 0, 'pipeline.js — 번호 이름으로 바로 쓰는 자리 0');
     const ttsBare = PL.split('\n').filter((l) => /path\.join\(workDir, `\$\{s\.num\}\./.test(l) && !/claimPath/.test(l) && !/fillSilent|_raw_/.test(l));
     const silentLines = PL.slice(PL.indexOf('function fillSilent('), PL.indexOf('function fillSilent(') + 400);
     ok(ttsBare.filter((l) => !silentLines.includes(l.trim())).length === 0, 'TTS 저장 자리(캐시 복사·배속·정속·폴백) 전부 claimPath');
     const nClaim = (M.match(/P\.claimPath\(/g) || []).length;
-    ok(nClaim >= 8, `main.js claimPath 호출 ${nClaim}곳(배치 수거·나노바나나·ComfyUI 이미지·Grok API·ComfyUI 영상·Genspark 영상·AI 이미지·AI 영상·캐시 프리필)`);
+    ok(nClaim >= 6, `main.js claimPath 호출 ${nClaim}곳(배치 수거·나노바나나·ComfyUI 이미지·ComfyUI 영상·AI 이미지·AI 영상·캐시 프리필)`);
     ok((M.match(/!_usedByOther\(pr, g, x\)/g) || []).length === 3, '번호로 다시 잇기 3곳(그림·영상 relink · autoRelinkVideos)이 남의 파일을 집지 않는다');
     ok(/if \(_usedByOther\(project, g, out\)\)/.test(M), '업스케일본(NN_1080.mp4)도 이웃 것 위에 쓰지 않는다');
   }

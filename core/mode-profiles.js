@@ -20,7 +20,6 @@ const MODE_PROFILES = {
     parser: 'sentence-splitter',                   // core/parsers/longform-parser (Phase 3 이식)
     grouping: { strategy: 'group-builder', groupSize: 3, introMaxChars: 50 },
     captionMaxChars: 18,
-    videoCap: { grok: 6, flow: 8 },
     defaultTtsSpeed: 1.15,                         // 롱폼 음성배속 — 합성 1.0 → atempo 1.15배
     // 자막 기본 스타일 — 롱폼(위치조정.vrew 분석값): 아래 기준 + -50(=-0.125), 왼쪽 정렬, 크기 100, 너비 96%.
     captionYAlign: 'bottom',       // 세로 기준 = 아래 (위치조정.vrew 와 일치)

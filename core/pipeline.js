@@ -14,7 +14,6 @@ const { spawnSync } = require('child_process');
 const { getModeProfile, normalizeMode } = require('./mode-profiles');
 const { splitCaptionLines, meaningfulLen } = require('./caption-splitter');
 const TtsCache = require('./tts-cache');
-const MediaCache = require('./media-cache');
 const { buildVrew } = require('../vrew/vrew-builder');
 const presetStore = require('../tts/preset-store');
 const { getInstance: getTTS } = require('../tts/tts-manager');
@@ -874,7 +873,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
 }
 // ── 이미지 생성 ─────────────────────────────────────────
 // group.imagePrompt 를 "그대로" 투입. 컷 num → cut{num}.png. 결과를 group.imagePath 에 매핑.
-// 모든 이미지 엔진(Genspark/Flow/…) 공통 최종 프롬프트 빌더 — 엔진이 달라도 동일 프롬프트 보장.
+// 모든 이미지 엔진 공통 최종 프롬프트 빌더 — 엔진이 달라도 동일 프롬프트 보장.
 //   `<스타일>, <대본 이미지프롬프트>, no text, no watermark`
 // 공통 네거티브 — 지저분·비호감 캐릭터 방지(엔진들이 별도 네거티브칸이 없어 긍정 프롬프트에 자연어로 부착).
 const NEG_UGLY = 'no ugly faces, no deformed or distorted faces, no disfigured features, no mutated or extra limbs, no malformed hands, no creepy or unpleasant expressions';
@@ -962,250 +961,6 @@ function nudgePromptForRetry(prompt, level = 1) {
   return out === src ? `${out} .` : `${out}.`;
 }
 
-// 모더레이션(NSFW) 우회용 프롬프트 순화 — 무기/폭력/유혈/선정 표현을 완화.
-//   내용이 다소 바뀌어도 검은 화면보다 낫다(로그로 알림). 한국사 장면(군졸·추격 등)이 자주 걸림.
-function softenForModeration(prompt) {
-  let p = ' ' + String(prompt || '') + ' ';
-  const rules = [
-    [/\b(spears?|swords?|blades?|knives?|knife|daggers?|weapons?|arrows?|bows?|guns?|rifles?)\b/gi, 'wooden staff'],
-    [/\b(blood|bloody|gore|gory|wounds?|wounded|injur(?:y|ies|ed))\b/gi, ' '],
-    [/\b(killing|killed|kills?|murder\w*|slay\w*|stab\w*|attack\w*|fight\w*|battle|combat|violence|violent|assault\w*)\b/gi, 'confront'],
-    [/\b(chase|chasing|hunt\w*|pursu\w*|capture|capturing|arrest\w*)\b/gi, 'follow'],
-    [/\b(corpse|dead body|death|dying|execution|behead\w*)\b/gi, 'fallen figure'],
-    [/\b(naked|nude|nudity|sexy|seductive|erotic|cleavage|lingerie)\b/gi, 'fully clothed'],
-    [/\b(torture\w*|whip\w*|beating|beaten|punish\w*)\b/gi, 'scene'],
-  ];
-  for (const [re, to] of rules) p = p.replace(re, to);
-  p = p.replace(/\s{2,}/g, ' ').trim();
-  return p + ', wholesome historical illustration, safe for work, no violence, no weapons';
-}
-
-async function generateImagesGenspark(project, imagesDir, logger, abortSignal, stylePrompt, onlyNums, onProgress, profileId) {
-  fs.mkdirSync(imagesDir, { recursive: true });
-  const groups = project.groups;
-  const idx = groups.map((g, i) => i).filter((i) => groups[i].imagePrompt && groups[i].imagePrompt.trim()
-    && !(groups[i].imagePath && fs.existsSync(groups[i].imagePath)) // 이미 있음(캐시 프리필) → 건너뜀
-    && !(groups[i]._covered && !onlyNums)   // 🖼 앞 그룹 그림이 아래층으로 이어져 보이는 그룹
-    && (!onlyNums || onlyNums.includes(groups[i].num)));
-  if (!idx.length) { (logger || (() => {}))('이미지 프롬프트가 있는 컷이 없음'); return []; }
-
-  const log = logger || (() => {});
-  // 모든 엔진(Genspark/Flow/…) 공통 최종 프롬프트 — 스타일 앞 + 대본 + no text/no watermark.
-  const prompts = idx.map((i) => buildImagePrompt(stylePrompt, groups[i].imagePrompt));
-  const outputPaths = idx.map((i) => claimPath(path.join(imagesDir, `${String(groups[i].num).padStart(2, '0')}.png`), groups[i].imagePath, IMG_EXTS));
-
-  const { GensparkEngine } = require('../genspark-engine');
-  const eng = new GensparkEngine({ profileId: profileId || 'default', logger: log });
-  eng._aspectRatio = project.aspect || '16:9'; // 프로젝트 비율 (config ratio override)
-
-  // Genspark 는 한 번 제출에 최대 6장 → 6개씩 묶어 배치 제출.
-  //   배치가 6장 중 일부만 나오면 engine 이 순서 오매칭 방지로 통째 버림 → 여기서 재시도.
-  //   1) 배치 1회 → 2) 빠진 컷은 단건(1장)으로 재생성(매핑 안전·막힌 컷 격리). 단건도 MAX_SINGLE_TRY 회.
-  const BATCH = 6;
-  const MAX_SINGLE_TRY = 2;
-  const results = new Array(idx.length);
-  let limitReached = false; // 사용 한도/제한 도달 → 순환에서 다음 엔진으로 넘기는 신호. 감지 메시지(문자열)가 담기면 재설정 시각 파싱용.
-  //   '__STALL__' = 한도 메시지 없이 연속 무응답(침묵 정체) — 과부하/한도 추정. 상위가 추정 쿨다운 설정.
-  let consecMiss = 0; const STALL_LIMIT = 3; // 연속 무응답 N장이면 조기 종료 → 다음 엔진(Flow)
-  // 모더레이션 순화가 이 실행에서 몇 번 헛수고였나 — N번 넘으면 이후 컷은 순화를 건너뛰고 다음 엔진에 넘긴다.
-  let softenFutile = 0; const SOFTEN_GIVEUP = 2;
-  try {
-    for (let start = 0; start < idx.length; start += BATCH) {
-      if (abortSignal && abortSignal()) break;
-      if (limitReached) break;
-      const ps = prompts.slice(start, start + BATCH);
-      const ops = outputPaths.slice(start, start + BATCH);
-      const saved = new Array(ps.length).fill(null);
-      // 이 배치의 그룹만 '생성 중' 표시 → 지금 제출하는 그룹 카드에만 스피너(전 그룹 동시 표시 방지).
-      //   Genspark 는 한 번에 최대 6장 제출이라 최대 6개까지 동시 표시(실제로 동시에 만드는 만큼).
-      for (let k = 0; k < ps.length; k++) { const g = groups[idx[start + k]]; if (g && !g.imagePath) g.imageStatus = 'generating'; }
-      if (onProgress) { try { onProgress(); } catch {} }
-      // 저장되는 즉시 그룹에 매핑 → UI 갱신
-      const mapSave = (k, p) => {
-        const g = groups[idx[start + k]];
-        if (g && p) { g.imagePath = p; g.imageStatus = 'done'; if (onProgress) { try { onProgress(); } catch {} } }
-      };
-      log(`[Genspark] 배치 ${Math.floor(start / BATCH) + 1}: ${ps.length}장 한 번에 제출`);
-      const r = await eng.generateImagesBatch({ prompts: ps, outputPaths: ops, abortSignal: abortSignal || (() => false), onSaved: mapSave });
-      const limHit = r.find((x) => x && x.limit);
-      if (limHit) { limitReached = String(limHit.error || true); log('[Genspark] ⚠ 사용 한도/제한 도달 — 남은 이미지는 순환의 다음 엔진으로'); break; }
-      for (let k = 0; k < ps.length; k++) if (r[k] && r[k].path) saved[k] = r[k];
-      if (saved.some((s) => s && s.path)) consecMiss = 0; // 배치에서 한 장이라도 나오면 정체 카운트 리셋
-
-      // 빠진 컷 → 단건 재생성 (6장이 다 나올 때까지)
-      const missing = [];
-      for (let k = 0; k < ps.length; k++) if (!(saved[k] && saved[k].path)) missing.push(k);
-      if (missing.length && !(abortSignal && abortSignal())) {
-        log(`[Genspark] ⚠ 배치 미완료 — 빠진 ${missing.length}장을 단건으로 재생성`);
-        for (const k of missing) {
-          if (abortSignal && abortSignal()) break;
-          if (limitReached) break;
-          const num = groups[idx[start + k]].num;
-          let prevBlocked = false;
-          let didSoften = false;   // 이 컷에서 실제로 순화 재시도를 했나(헛수고 집계용)
-          for (let attempt = 1; attempt <= MAX_SINGLE_TRY; attempt++) {
-            // 직전이 NSFW 차단이면 프롬프트를 순화해 우회. transient 실패면 원본 그대로 재시도.
-            const usePrompt = prevBlocked ? softenForModeration(ps[k]) : ps[k];
-            if (prevBlocked) didSoften = true;
-            log(`[Genspark] 단건 재생성 G${num} (시도 ${attempt}/${MAX_SINGLE_TRY})${prevBlocked ? ' · 프롬프트 순화' : ''}`);
-            const rr = await eng.generateImagesBatch({ prompts: [usePrompt], outputPaths: [ops[k]], abortSignal: abortSignal || (() => false), onSaved: (_kk, p) => mapSave(k, p) });
-            if (rr[0] && rr[0].path) { saved[k] = rr[0]; consecMiss = 0; break; }
-            if (rr[0] && rr[0].limit) { limitReached = String(rr[0].error || true); break; } // 한도 → 단건 중단
-            prevBlocked = !!(rr[0] && rr[0].blocked);
-            // 🔑 순화가 이 실행에서 이미 여러 번 헛수고였다면 더 시도하지 않고 **다음 엔진에 넘긴다**.
-            //   2026-08-26 아내 PC 실측: G5·G6·G7 모두 순화로도 막혔고, 그 뒤 Flow 가 전부 만들었다.
-            //   컷당 약 25초씩 버리던 것을 없앤다. (순화가 통하는 대본에서는 그대로 동작한다)
-            if (prevBlocked && softenFutile >= SOFTEN_GIVEUP) {
-              log(`[Genspark] G${num} NSFW 차단 — 이 실행에서 순화가 ${softenFutile}번 헛수고라 재시도를 건너뜁니다(다음 엔진이 이어 만듭니다)`);
-              break;
-            }
-            if (prevBlocked) log(`[Genspark] G${num} NSFW 차단 감지 — 다음 시도는 프롬프트 순화`);
-            else if (attempt < MAX_SINGLE_TRY) log(`[Genspark] G${num} 단건 실패 — 재시도`);
-          }
-          if (!(saved[k] && saved[k].path)) {
-            const g = groups[idx[start + k]];
-            if (prevBlocked) {
-              g.imageStatus = 'blocked';
-              if (didSoften) softenFutile++;   // 순화까지 해봤는데 실패 → 다음 컷부터는 생략 판단에 쓴다
-              log(`[Genspark] ⛔ G${num} 모더레이션(NSFW)으로 막힘${didSoften ? ' — 순화로도 실패' : ''}. 프롬프트 수정 또는 다른 엔진(ComfyUI) 필요`);
-            }
-            else {
-              log(`[Genspark] ✗ G${num} 최종 실패`);
-              // 한도 메시지 없이 연속 무응답(침묵 정체)이 STALL_LIMIT 장 쌓이면 과부하/한도로 추정 → 조기 종료(Flow 로).
-              if (++consecMiss >= STALL_LIMIT) {
-                limitReached = '__STALL__';
-                log(`[Genspark] ⚠ 연속 ${consecMiss}장 무응답(침묵 정체) — 한도/과부하로 추정, Genspark 중단하고 순환의 다음 엔진(Flow)으로`);
-              }
-            }
-          }
-        }
-      }
-      for (let k = 0; k < ps.length; k++) results[start + k] = saved[k] || { error: '생성 실패(재시도 소진)' };
-    }
-  } finally {
-    try { await eng.stop(); } catch {}
-  }
-
-  results.forEach((r, k) => {
-    const g = groups[idx[k]];
-    if (r && r.path) { g.imagePath = r.path; g.imageStatus = 'done'; }
-    else if (g.imageStatus === 'generating') { g.imageStatus = 'fail'; }
-  });
-  if (onProgress) { try { onProgress(); } catch {} }
-  const ok = results.filter((r) => r && r.path).length;
-  log(`이미지 ${ok}/${idx.length} 생성`);
-  return { results, ok, total: idx.length, limitReached };
-}
-
-// ── 앞에서 N개 그룹 → Grok image-to-video (PrimingFlow 방식: 개수 지정) ──────────
-// videoCount 만큼 앞 그룹부터 영상화. 모션 프롬프트 = group.videoPrompt(I2V) || group.motionNote || Grok 기본.
-async function generateHookVideosGrok(project, videoDir, logger, abortSignal, videoCount, onProgress, onlyNums, videoDuration) {
-  fs.mkdirSync(videoDir, { recursive: true });
-  const log = logger || (() => {});
-  let targets;
-  if (onlyNums && onlyNums.length) {
-    targets = project.groups.filter((g) => onlyNums.includes(g.num)); // 지정 그룹만
-  } else {
-    const N = Math.max(0, parseInt(videoCount, 10) || 0);
-    if (!N) { log('비디오 개수 0 — 생성 안 함'); return []; }
-    targets = project.groups.slice(0, N); // 앞에서 N개 그룹
-  }
-
-  const { GrokEngine } = require('../grok-engine');
-  // Grok 멀티계정 — 오늘 한도 안 찬 계정 선택(없으면 default). 한도 추적은 markUsed.
-  const GrokAcc = require('./grok-accounts');
-  const grokAccObj = GrokAcc.pickActive();
-  const grokProfile = grokAccObj ? grokAccObj.id : 'default';
-  if (grokAccObj && grokAccObj.id !== 'default') log(`🔑 Grok 계정: ${grokAccObj.label}`);
-  const eng = new GrokEngine({ profileId: grokProfile, logger: log });
-  eng._aspectRatio = project.aspect || '16:9'; // 이미지 비율에 맞춰 영상 생성
-  // 클립 길이: '6s'/'10s' 고정값이 오면 그대로 사용, 그 외('auto' 등)면 그룹별 TTS 시간 기준 자동 결정.
-  const autoDur = !(videoDuration === '10s' || videoDuration === '6s');
-  if (!autoDur) eng._videoDuration = videoDuration;
-
-  const results = [];
-  let limitReached = null;
-  try {
-    for (const g of targets) {
-      if (abortSignal && abortSignal()) { log('⏹ 중단 — 남은 비디오 그룹 생략'); break; } // 중단 시 다음 그룹으로 넘어가지 않음
-      if (!g.imagePath || !fs.existsSync(g.imagePath)) {
-        log(`그룹${g.num}: 이미지가 없어 영상 건너뜀 (먼저 이미지 생성 필요)`);
-        results.push({ num: g.num, success: false, error: 'no image' });
-        continue;
-      }
-      if (g.videoPath && fs.existsSync(g.videoPath)) { results.push({ num: g.num, success: true }); continue; }
-      const outputPath = claimPath(path.join(videoDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);
-      const vprompt = g.videoPrompt || g.motionNote || g.videoMotionPrompt || '';
-      // ♻ 영상 캐시 재활용 — 같은 (영상프롬프트 + 원본이미지) 면 재생성 안 함.
-      const vck = MediaCache.videoKey(vprompt, g.imagePath, project.aspect || '16:9', 'grok');
-      const vhit = MediaCache.get(vck);
-      if (vhit) {
-        try { fs.copyFileSync(vhit.file, outputPath); g.videoPath = outputPath; g.videoSourceImage = g.imagePath; g.videoStatus = 'done'; log(`♻ 그룹${g.num} 영상 재활용(캐시)`); if (onProgress) { try { onProgress(); } catch {} } results.push({ num: g.num, success: true }); continue; } catch {}
-      }
-      if (autoDur) {
-        // 그룹 TTS 합에 맞춰 영상 길이 자동 결정 (로이 지정 2026-08-19):
-        //   13초 초과 → 15s · 6초 초과 → 10s · 그 외 → 6s
-        //   ⚠ 15s 는 grok.com 새 UI(2026-08)에서 생긴 옵션이고 **로그인 상태에서만** 칩이 보인다.
-        //     칩이 없으면 _pickRadio 가 실패 로그만 남기고 현재 값으로 진행한다(작업이 멈추지 않는다).
-        const gsec = project.getSentencesOfGroup(g).reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-        eng._videoDuration = gsec > 13 ? '15s' : (gsec > 6 ? '10s' : '6s');
-        log(`그룹${g.num}: TTS ${gsec.toFixed(1)}s → ${eng._videoDuration} 비디오`);
-      }
-      g.videoStatus = 'generating';
-      if (onProgress) { try { onProgress(); } catch {} } // '영상 변환 중' 배지 즉시 표시
-      // 영상 생성 — 실패(진입 타임아웃 등) 시 브라우저를 새로 띄워 1회 자동 재시도.
-      //   generateVideoFromImage 가 예외를 던져도 여기서 잡아 {success:false} 로 처리 →
-      //   한 그룹 실패가 대본 전체를 중단시키지 않고, 배지가 'generating' 에 고착되지 않음.
-      const ATTEMPTS = 2; // 1회 + 재시도 1회
-      let res = null;
-      for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
-        try {
-          res = await eng.generateVideoFromImage({
-            imagePath: g.imagePath,
-            prompt: g.videoPrompt || g.motionNote || g.videoMotionPrompt || null, // 없으면 Grok 기본 모션
-            outputPath,
-            abortSignal: abortSignal || (() => false),
-          });
-        } catch (e) {
-          res = { success: false, error: e && e.message ? e.message : String(e) };
-        }
-        // 성공 · 한도 도달 · 사용자 중단 이면 즉시 종료 (한도는 재시도해도 안 풀리므로 헛시도 방지)
-        if ((res && res.success && res.videoPath) || (res && res.limitReached) || (abortSignal && abortSignal())) break;
-        if (attempt < ATTEMPTS) {
-          log(`↻ 그룹${g.num} 영상 재시도 (${attempt}/${ATTEMPTS - 1}) — 이전 실패: ${res && res.error}`);
-          try { await eng.stop(); } catch {} // 브라우저 정리 → 다음 시도에서 start() 새로 진입
-        }
-      }
-      if (res && res.limitReached) {
-        // Grok 요청(전체) 한도 도달 — 더 시도해도 소용없음. 남은 그룹 중단하고 상위로 전파.
-        g.videoStatus = 'fail';
-        log(`⛔ 그룹${g.num} — Grok 요청 한도 도달${res.reset ? ` (${res.reset})` : ''} — 비디오 생성 중단`);
-        results.push({ num: g.num, ...res });
-        limitReached = res;
-        break;
-      }
-      if (res && res.success && res.videoPath) {
-        g.videoPath = res.videoPath;
-        g.videoSourceImage = g.imagePath;
-        g.videoStatus = 'done';
-        MediaCache.put(vck, res.videoPath, 'mp4');
-        log(`✓ 그룹${g.num} 영상 생성${res.downgradedTo ? ` (${res.downgradedTo})` : ''}`);
-      } else {
-        g.videoStatus = 'fail';
-        log(`✗ 그룹${g.num} 영상 실패: ${res && res.error}`);
-      }
-      results.push({ num: g.num, ...(res || { success: false }) });
-      if (onProgress) { try { onProgress(); } catch {} } // 그룹별 영상 완성 시 UI 갱신
-    }
-  } finally {
-    try { await eng.stop(); } catch {}
-  }
-  const okN = results.filter((r) => r && r.success).length;
-  if (okN > 0) { try { GrokAcc.markUsed(grokProfile, okN); } catch {} } // 계정 오늘 사용량 누적
-  if (limitReached) results.limitReached = limitReached; // 상위(runMakeAllCore)가 작업 중단·팝업 처리
-  return results;
-}
-
 // ── SRT 자막 파일 (subtitles 폴더용) ────────────────────
 // 🔑 시각 포맷은 core/caption-splitter 하나만 쓴다 — 자막을 내는 곳이 셋(.srt · 프리미어 · 화이트보드)이라
 //   세 벌로 두면 어느 하나만 고쳐져 조용히 갈라진다.
@@ -1246,7 +1001,7 @@ function sanitize(name) {
 module.exports = { setRoyHook, setPauseHook, speakerVoiceMap, nudgePromptForRetry,
   parseScript, parseScriptText, toDTO, getPreset, setPresetOverride, listPresets,
   makeTtsManager, fillTts, fillTtsList, quietPass, fillSilent, fillSilentYield, buildProjectVrew, vrewInputsOf, pausePlanOf, userPauseWins, sanitize,
-  generateImagesGenspark, generateHookVideosGrok, writeSrt,
+  writeSrt,
   buildImagePrompt, normalizePromptNegations, modestyClause, POS_MODEST, PERSON_RE,
   retryFs, isTransientFsError, claimPath, IMG_EXTS,
 };

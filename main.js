@@ -75,8 +75,6 @@ function presetThresholds(preset) {
     splitMode: pick(s.splitMode, preset.splitMode) || 'h3',
   };
 }
-// 영상 엔진 → Grok 클립 길이. 'grok'=자동(그룹 TTS 기준 6/10초, pipeline 에서 결정), 레거시 'grok10'=10s 고정.
-function grokDurOf(engine) { return engine === 'grok10' ? '10s' : 'auto'; }
 // AI 고지 결정 — 켤지는 사용자 선택(want · 작업바). **문구·나타나는 때·사라지는 때는 채널 설정**(2026-09-29 로이 · v0.5.87).
 //   채널 aiNotice = { text, unit: 'time'|'clip', fromSec, toSec, fromClip, toClip } — 끝을 비우면(0) 영상 끝까지.
 //   클립 = 화면의 자막 줄 번호(= .vrew 클립). 대본에서 문장 범위를 따로 정했으면(🏷 · pr.aiNoticeRange) 그것이 이긴다(visual-look).
@@ -552,7 +550,7 @@ app.whenReady().then(() => {
       try { await syncVoiceTags(); } catch {}    // 🏷 목소리 태그도(v0.7.36)
       // 화풍 내보내기는 **동기화 뒤**에 — 서버에서 받은 스타일이 반영된 값이 나가야 한다.
       try { exportChannelStyles(); } catch {}
-      // 🔁 채널의 옛 ComfyUI·Genspark 도구 → AI 이미지·AI 영상(v0.9.92 · 바꾼 것은 preset-store 가 저장 · 여기서 로그)
+      // 🔁 채널의 옛 도구(ComfyUI 등) → AI 이미지·AI 영상(v0.9.92 · 바꾼 것은 preset-store 가 저장 · 여기서 로그)
       try { const PS = require('./tts/preset-store'); PS.loadAll(); _logEngineMigrations(PS.takeEngineMigrations()); } catch {}
       // 🌡 GPU 온도 — 오래된 CSV 정리 + 14일치 이상 쌓였으면 요약을 팝업으로 알림(30일마다 반복).
       //   로이가 잊어도 앱이 먼저 말한다(2026-08-22 요청: "몇 주 데이터가 쌓이면 나에게도 알려줘").
@@ -693,7 +691,7 @@ setInterval(() => {
 
 // ── 절전 차단(작업 중에만) ───────────────────────────────────────────────────
 //  왜: 모니터가 절전으로 꺼지면 ① 복귀 시 해상도·DPI 가 기본값으로 떨어져 창 배치가 흐트러지고
-//      ② 브라우저 자동화(Genspark/Flow/Grok)의 좌표 클릭·타이머가 흔들린다. 긴 작업 중엔 막는 게 안전.
+//      ② 브라우저 자동화(유튜브 Studio 등)의 좌표 클릭·타이머가 흔들린다. 긴 작업 중엔 막는 게 안전.
 //  ⚠ 'prevent-display-sleep' = 화면 끄기 + 시스템 절전 모두 차단. 작업이 끝나면 반드시 해제(전기·수명).
 //  참조 카운트: 여러 작업(TTS 큐 · 이미지 큐 · 비디오)이 겹쳐도 마지막 하나가 끝날 때만 해제한다.
 const { powerSaveBlocker } = require('electron');
@@ -956,9 +954,6 @@ ipcMain.handle('dict-save', (_e, entries = []) => {
     return clean;
   } catch (e) { return null; }
 });
-// 이미지 순환 설정 — 풀에 넣을 엔진/순서 (Genspark↔Flow 등)
-ipcMain.handle('get-image-rotation', () => require('./core/image-rotation').load());
-ipcMain.handle('set-image-rotation', (_e, patch) => require('./core/image-rotation').save(patch || {}));
 // Nano Banana 2 Lite (Gemini 이미지 API) 설정 — 모델명·비율전송
 ipcMain.handle('get-gemini-image-config', () => { try { return require('./core/gemini-image').loadConfig(); } catch { return {}; } });
 ipcMain.handle('set-gemini-image-config', (_e, patch) => { try { return require('./core/gemini-image').saveConfig(patch || {}); } catch (e) { return { error: String((e && e.message) || e) }; } });
@@ -1042,118 +1037,6 @@ ipcMain.handle('test-comfy-video', async (_e, args = {}) => {
 
 // 🌙 나노바나나 2.1 배치는 이미지 도구 항목(imgEngine 'gemini-batch')이다 — 제출·대기·회수는 runGeminiBatchImages 한 곳(옛 배치 단추·IPC 는 2026-10-08 에 없앴다).
 
-// LoRA 데이터셋 수집 설정 — Genspark/Flow 이미지를 학습용으로 적립
-ipcMain.handle('get-lora-collect', () => { const L = require('./core/lora-collect'); return { ...L.load(), count: L.count() }; });
-ipcMain.handle('set-lora-collect', (_e, patch) => { const L = require('./core/lora-collect'); const c = L.save(patch || {}); return { ...c, count: L.count() }; });
-ipcMain.handle('pick-lora-dir', async () => {
-  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
-  if (r.canceled || !r.filePaths[0]) return null;
-  const L = require('./core/lora-collect'); const c = L.save({ dir: r.filePaths[0] }); return { ...c, count: L.count() };
-});
-ipcMain.handle('open-lora-folder', () => { try { const dir = require('./core/lora-collect').load().dir; fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); } catch (e) { log('LoRA 폴더 열기 오류: ' + e.message); } return true; });
-
-// ── 👤 계정 통합 관리 (2026-08-19, v0.3.21) ─────────────────────────────────
-// Genspark · Flow · Grok 계정의 **아이디/비밀번호**를 OS 암호화(safeStorage)로 보관하고,
-// 🔑 로그인 창에서 자동 입력한다. CAPTCHA·2FA 는 사람이 마무리(core/login-autofill.js).
-// 🔒 **비밀번호는 렌더러로 되돌려 보내지 않는다** — hasPassword 플래그만 준다.
-ipcMain.handle('creds-available', () => require('./core/account-creds').available());
-ipcMain.handle('get-account-creds', (_e, args = {}) =>
-  require('./core/account-creds').getPublic(args.service, args.accId));
-ipcMain.handle('set-account-creds', (_e, args = {}) => {
-  const r = require('./core/account-creds').set(args.service, args.accId, {
-    username: args.username, password: args.password,
-  });
-  if (r.ok) log(`🔒 ${args.service} 계정 자격증명 저장 (${args.accId}) — OS 암호화`);
-  else log(`⚠ 자격증명 저장 실패: ${r.error}`);
-  return r;
-});
-ipcMain.handle('clear-account-creds', (_e, args = {}) => {
-  const r = require('./core/account-creds').clear(args.service, args.accId);
-  if (r.ok) log(`🔒 ${args.service} 계정 자격증명 삭제 (${args.accId})`);
-  return r;
-});
-
-/**
- * 계정별 로그인 흔적 — 브라우저를 띄우지 않고 **프로필 폴더의 쿠키 파일 mtime** 만 본다.
- *   (쿠키 DB 를 파싱하지 않는다 — 세션 갱신 때 파일이 쓰이므로 mtime 만으로 "언제까지 살아 있었나"를 안다)
- *   요즘 크롬은 `Default/Network/Cookies` 에 둔다. 옛 경로(`Default/Cookies`)도 폴백으로 본다.
- */
-function _accountLoginStatus(service, accId) {
-  const base = {
-    flow: path.join(os.homedir(), '.flow-app', 'profiles'),
-    genspark: path.join(os.homedir(), '.flow-app', 'genspark-profiles'),
-    grok: path.join(os.homedir(), '.flow-app', 'grok-profiles'),
-  }[service];
-  if (!base) return { exists: false };
-  const dir = path.join(base, accId || 'default');
-  if (!fs.existsSync(dir)) return { exists: false };
-  for (const rel of [['Default', 'Network', 'Cookies'], ['Default', 'Cookies']]) {
-    const f = path.join(dir, ...rel);
-    try {
-      if (fs.existsSync(f)) {
-        const st = fs.statSync(f);
-        return { exists: true, cookieAt: st.mtimeMs, days: Math.floor((Date.now() - st.mtimeMs) / 86400000) };
-      }
-    } catch (_) {}
-  }
-  return { exists: true, cookieAt: 0 };   // 프로필은 있지만 쿠키 파일이 없다 = 로그인 안 함
-}
-ipcMain.handle('get-account-status', (_e, args = {}) => {
-  const svc = args.service;
-  const Store = { genspark: './core/genspark-accounts', grok: './core/grok-accounts' }[svc];
-  if (!Store) return { accounts: [] };
-  const d = require(Store).list();
-  const Creds = require('./core/account-creds');
-  return {
-    dailyCap: d.dailyCap,
-    credsAvailable: Creds.available(),
-    accounts: (d.accounts || []).map((a) => ({
-      ...a,
-      // 🔒 아이디는 보여주고 **비밀번호는 있는지만** 알려준다(값은 렌더러로 보내지 않는다).
-      creds: Creds.getPublic(svc, a.id),
-      login: _accountLoginStatus(svc, a.id),
-    })),
-  };
-});
-
-/**
- * 🔑 로그인 창이 뜬 직후 자격증명을 자동 입력한다(저장돼 있을 때만).
- *   저장된 게 없으면 아무것도 하지 않고 사용자가 직접 로그인한다 = 기존 동작.
- *   ⚠ 복호화된 비밀번호는 이 함수 안에서만 쓰이고 로그·렌더러로 나가지 않는다.
- */
-async function _autofillLogin(page, service, accId) {
-  try {
-    if (!page || (page.isClosed && page.isClosed())) return;
-    const { getSecret } = require('./core/account-creds');
-    const s = getSecret(service, accId);
-    if (!s.username && !s.password) return;
-    const { autofill } = require('./core/login-autofill');
-    await autofill(page, { service, username: s.username, password: s.password, logger: log, log });
-  } catch (e) {
-    log(`자격증명 자동 입력 건너뜀: ${e.message}`);
-  }
-}
-
-// Genspark 멀티계정
-ipcMain.handle('get-genspark-accounts', () => require('./core/genspark-accounts').list());
-ipcMain.handle('add-genspark-account', (_e, label) => { require('./core/genspark-accounts').add(label); return require('./core/genspark-accounts').list(); });
-ipcMain.handle('remove-genspark-account', (_e, id) => { require('./core/genspark-accounts').remove(id); return require('./core/genspark-accounts').list(); });
-ipcMain.handle('rename-genspark-account', (_e, args = {}) => { require('./core/genspark-accounts').rename(args.id, args.label); return require('./core/genspark-accounts').list(); });
-ipcMain.handle('set-genspark-cap', (_e, n) => { require('./core/genspark-accounts').setCap(n); return require('./core/genspark-accounts').list(); });
-// Genspark 한도 쿨다운(재설정 시각) 조회 — 한도 감지 시 기억한 재설정 시각을 UI 에 표시.
-//   genspark-accounts.json(cooldowns)에 영속되므로 앱 재시작해도 유지. 여러 계정이면 가장 이른(먼저 풀리는) 시각.
-ipcMain.handle('genspark-cooldown', () => {
-  try {
-    const GsAcc = require('./core/genspark-accounts');
-    const accs = (GsAcc.list().accounts) || [];
-    const times = accs.map((a) => GsAcc.cooldownUntil(a.id)).filter((t) => t > 0);
-    if (!times.length) return { until: 0, label: '' };
-    const until = Math.min(...times);
-    return { until, label: fmtClock(until) };
-  } catch { return { until: 0, label: '' }; }
-});
-// Grok 한도 쿨다운 조회 — 영상 재설정 시각(재시작해도 유지). 헤더 뱃지 표시용.
-ipcMain.handle('grok-cooldown', () => { try { return require('./core/grok-cooldown').get(); } catch { return { until: 0, label: '' }; } });
 // 화면 내 검색(Ctrl+F) — 렌더된 텍스트 찾기/이동. text 빈값=검색 종료.
 ipcMain.handle('find-in-page', (_e, args = {}) => {
   if (!win) return;
@@ -1162,53 +1045,6 @@ ipcMain.handle('find-in-page', (_e, args = {}) => {
   try { win.webContents.findInPage(text, { forward: args.forward !== false, findNext: !!args.findNext, matchCase: false }); } catch {}
 });
 ipcMain.handle('find-stop', () => { try { if (win) win.webContents.stopFindInPage('clearSelection'); } catch {} });
-ipcMain.handle('genspark-login', async (_e, args = {}) => {
-  const accId = (args && args.accId) || 'default';
-  log(`🔑 Genspark 로그인 (${accId}) — 열린 크롬에서 직접 로그인하세요 (쿠키 저장됨)`);
-  try {
-    const { GensparkEngine } = require('./genspark-engine');
-    const eng = new GensparkEngine({ profileId: accId, logger: log });
-    await eng.login(async () => {
-      await _autofillLogin(eng.page, 'genspark', accId);
-      // 창을 연 채로, 사용자가 로그인 마치고 버튼 누를 때까지 대기 (자동 감지 미사용)
-      await dialog.showMessageBox(win, {
-        type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
-        title: 'Genspark 로그인',
-        message: '열린 크롬 창에서 Genspark(구글) 로그인을 완료하세요.',
-        detail: '로그인을 마친 뒤 이 [로그인 완료] 버튼을 누르면 쿠키가 저장되고 창이 닫힙니다.',
-      });
-    });
-    log('✓ Genspark 로그인 완료(쿠키 저장).');
-    return { ok: true };
-  } catch (e) { log('Genspark 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
-});
-
-// Grok(X) 멀티계정 — 영상
-ipcMain.handle('get-grok-accounts', () => require('./core/grok-accounts').list());
-ipcMain.handle('add-grok-account', (_e, label) => { require('./core/grok-accounts').add(label); return require('./core/grok-accounts').list(); });
-ipcMain.handle('remove-grok-account', (_e, id) => { require('./core/grok-accounts').remove(id); return require('./core/grok-accounts').list(); });
-ipcMain.handle('rename-grok-account', (_e, args = {}) => { require('./core/grok-accounts').rename(args.id, args.label); return require('./core/grok-accounts').list(); });
-ipcMain.handle('set-grok-cap', (_e, n) => { require('./core/grok-accounts').setCap(n); return require('./core/grok-accounts').list(); });
-ipcMain.handle('grok-login', async (_e, args = {}) => {
-  const accId = (args && args.accId) || 'default';
-  log(`🔑 Grok(X) 로그인 (${accId}) — 열린 크롬에서 X 계정으로 로그인하세요`);
-  try {
-    const { GrokEngine } = require('./grok-engine');
-    const eng = new GrokEngine({ profileId: accId, logger: log });
-    await eng.login(async () => {
-      await _autofillLogin(eng.page, 'grok', accId);
-      await dialog.showMessageBox(win, {
-        type: 'info', buttons: ['로그인 완료'], defaultId: 0, noLink: true,
-        title: 'Grok(X) 로그인',
-        message: '열린 크롬 창에서 X(트위터) 계정으로 로그인을 완료하세요.',
-        detail: '로그인을 마친 뒤 이 [로그인 완료] 버튼을 누르면 쿠키가 저장되고 창이 닫힙니다.',
-      });
-    });
-    log('✓ Grok 로그인 완료(쿠키 저장).');
-    return { ok: true };
-  } catch (e) { log('Grok 로그인 오류: ' + e.message); return { ok: false, error: e.message }; }
-});
-
 // ── STT (음성·영상 → 텍스트) — OmniVoice Whisper. 원본과 같은 폴더에 같은 이름 .txt 생성. ──
 //   동영상은 ffmpeg 로 오디오 추출 후 전사. 긴 파일은 asr-client 가 청크 분할. ■ 중단(S.abort)으로 멈춤.
 // ⚠ **변환 여부를 정하는 목록이 아니다** — 로그 문구를 「동영상 추출」/「mp3 변환」으로
@@ -2323,18 +2159,11 @@ ipcMain.handle('delete-images', async (_e, args = {}) => {
 // 비디오 일괄 삭제 — 파일 + 영상 캐시 항목 + 화면 표시. (이미지는 그대로 남는다 → 켄번스로 진행 가능)
 ipcMain.handle('delete-videos', async () => {
   if (!S.parsed || !S.parsed.projects) { log('열린 대본이 없습니다.'); return currentDTO(); }
-  const MC = require('./core/media-cache');
-  let files = 0, kept = 0, cached = 0;
+  let files = 0, kept = 0;
   for (const pr of S.parsed.projects) {
     const mediaDir = S.outRoot ? shortsDirs(S.outRoot, pr.shortsNum).media : null;
     for (const g of pr.groups) {
-      // 영상 캐시 키 = 영상프롬프트 + **원본 이미지 내용해시** → 이미지가 아직 있는 지금 계산해야 지울 수 있다.
-      if (g.imagePath && fs.existsSync(g.imagePath)) {
-        try {
-          const k = MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', 'grok');
-          if (MC.get(k)) { MC.del(k); cached++; } else MC.del(k);
-        } catch {}
-      }
+      // (영상 재활용 캐시는 옛 브라우저 영상 엔진만 썼다 — v1.0.49 에 엔진과 함께 지웠다)
       if (g.videoPath) {
         if (mediaDir && _inDir(g.videoPath, mediaDir)) { try { fs.unlinkSync(g.videoPath); files++; } catch {} }
         else kept++;  // 일괄첨부 원본 경로 — 지우면 사용자 원본이 사라진다
@@ -2343,7 +2172,7 @@ ipcMain.handle('delete-videos', async () => {
     }
     if (mediaDir) files += _wipeByExt(mediaDir, /\.(mp4|webm|mov|mkv|avi|m4v)$/i); // 업스케일본(NN_1080.mp4)·고아 파일까지
   }
-  log(`🗑 비디오 삭제 완료 — 파일 ${files}개 + 재활용캐시 ${cached}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. 이미지는 그대로 남습니다.`);
+  log(`🗑 비디오 삭제 완료 — 파일 ${files}개 삭제${kept ? ` (외부 첨부 ${kept}개는 참조만 해제, 원본 파일 유지)` : ''}. 이미지는 그대로 남습니다.`);
   pushDtoUpdate();
   return currentDTO();
 });
@@ -4498,75 +4327,6 @@ function _dur(sec) {
   return m + '분 ' + Math.round(s - m * 60) + '초';
 }
 
-// Genspark 한도 메시지의 재설정 시각 파싱 — "AI Image 5시간 제한에 도달했습니다. 7월 14일 오후 3:39에 재설정됩니다"
-//   파싱 성공 → 그 시각(ms). 실패 → 지금+60분(보수적 기본). 24시간 초과로 파싱되면 오파싱으로 보고 기본값.
-function parseLimitResetTime(msg) {
-  const FALLBACK = Date.now() + 60 * 60 * 1000;
-  const m = String(msg || '').match(/(\d{1,2})월\s*(\d{1,2})일\s*(오전|오후)\s*(\d{1,2}):(\d{2})/);
-  if (!m) return FALLBACK;
-  let h = parseInt(m[4], 10) % 12;
-  if (m[3] === '오후') h += 12;
-  const now = new Date();
-  let d = new Date(now.getFullYear(), parseInt(m[1], 10) - 1, parseInt(m[2], 10), h, parseInt(m[5], 10));
-  if (d.getTime() <= Date.now()) d = new Date(d.getFullYear() + 1, d.getMonth(), d.getDate(), h, parseInt(m[5], 10)); // 연말 경계
-  const ts = d.getTime();
-  if (ts - Date.now() > 24 * 60 * 60 * 1000) return FALLBACK; // 5시간 제한인데 하루 넘게 나오면 오파싱
-  return ts;
-}
-const fmtClock = (ts) => { const d = new Date(ts); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-// Grok 한도 재설정 시각 파싱 — "20일 (월) 오후 3:23에 재설정"(요일·월 생략 가능) · "7월 14일 오후 6:01에 다시 사용" · "오후 6:01".
-//   월+일 있으면 그날, 일만 있으면 이번달(지났으면 다음달) 그 날짜, 시각만 있으면 오늘(지났으면 내일). 8일 넘게 나오면 오파싱=0.
-function parseGrokReset(msg) {
-  const s = String(msg || ''); const now = new Date();
-  const t = s.match(/(오전|오후)\s*(\d{1,2}):(\d{2})/); if (!t) return 0;
-  let h = parseInt(t[2], 10) % 12; if (t[1] === '오후') h += 12; const mm = parseInt(t[3], 10);
-  const md = s.match(/(\d{1,2})월\s*(\d{1,2})일/); const dOnly = s.match(/(\d{1,2})일/);
-  let d;
-  if (md) { d = new Date(now.getFullYear(), +md[1] - 1, +md[2], h, mm); if (d.getTime() <= Date.now()) d = new Date(now.getFullYear() + 1, +md[1] - 1, +md[2], h, mm); }
-  else if (dOnly) { const day = +dOnly[1]; d = new Date(now.getFullYear(), now.getMonth(), day, h, mm); if (d.getTime() <= Date.now()) d = new Date(now.getFullYear(), now.getMonth() + 1, day, h, mm); }
-  else { d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, mm); if (d.getTime() <= Date.now()) d = new Date(d.getTime() + 86400000); }
-  const ts = d.getTime();
-  if (ts - Date.now() > 8 * 24 * 3600 * 1000) return 0;
-  return ts;
-}
-function grokCoolUntil() { try { return require('./core/grok-cooldown').get().until || 0; } catch { return 0; } }
-function recordGrokCooldown(vr) {
-  try {
-    const reset = (vr && typeof vr === 'object') ? (vr.reset || '') : '';
-    const until = parseGrokReset(reset);
-    if (until) { require('./core/grok-cooldown').set(until, fmtClock(until)); log(`⏸ Grok 한도 — ${fmtClock(until)}까지 영상 생성 건너뜀(재설정 시각 기억, 앱 재시작해도 유지)`); }
-    else if (reset) log(`⏸ Grok 한도 — 재설정 텍스트 "${reset}" 시각 파싱 실패 (로그의 [DUMP 한도영역] 공유 시 고정)`);
-    else log('⏸ Grok 한도 — 재설정 시각 미확인 (빨간 시계 팝업 못 읽음 — 로그의 [DUMP 한도영역] 공유 요망)');
-  } catch {}
-}
-
-// Grok Imagine 비디오 API (image→video, 브라우저 없이 REST). 이미지 있는 그룹만 i2v.
-//   videoEngine='grok-api' 경로. 사용량 과금(SuperGrok 구독과 별개) — xAI 키(secret-store 'xai') 필요.
-async function runGrokApiVideos(pr, mediaDir, onlyNums) {
-  const GA = require('./core/grok-api');
-  if (!GA.hasKey()) { log('⚠ xAI API 키가 없습니다 — 헤더 ⚙(Grok API)에서 키를 입력하세요.'); return; }
-  const targets = pr.groups.filter((g) => (g.imagePath && fs.existsSync(g.imagePath)) && (!onlyNums || onlyNums.includes(g.num)) && !(g.videoPath && fs.existsSync(g.videoPath)));
-  if (!targets.length) { log('🎬 Grok API — 영상화할(이미지 있는) 그룹이 없습니다'); return; }
-  fs.mkdirSync(mediaDir, { recursive: true });
-  log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok API · ${targets.length}개 그룹)…`);
-  for (const g of targets) {
-    if (S.abort) { log('⏹ 중단됨'); break; }
-    const sents = pr.getSentencesOfGroup(g);
-    const totalSec = sents.reduce((a, s) => a + (s.ttsDurationSec || 0), 0);
-    const durationSec = totalSec > 0 ? Math.max(1, Math.min(15, Math.ceil(totalSec))) : 6;
-    const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
-    const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
-    g.videoStatus = 'generating'; pushDtoUpdate();
-    log(`  · G${g.num} → Grok API (${durationSec}초, ${pr.aspect})…`);
-    try {
-      const r = await GA.generateVideoToFile({ imagePath: g.imagePath, prompt, aspect: pr.aspect, durationSec, outputPath: out, abortSignal: () => S.abort, logger: log });
-      if (r.success) { g.videoPath = r.videoPath; g.videoStatus = 'done'; log(`  ✓ G${g.num} 완료`); }
-      else { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`); if (r.limitReached) { log('⛔ xAI 429 — 사용량/결제 한도. 작업을 멈춥니다'); S.abort = true; } }
-    } catch (e) { g.videoStatus = 'fail'; log(`  ✗ G${g.num} 오류: ${e.message}`); }
-    pushDtoUpdate();
-  }
-}
-
 // 🧩 kie.ai (v0.9.66 · 로이 2026-10-17 「장기적으로 kie 하나로 운영」) — 이미지·비디오 엔진 값 `kie:<모델>` · 요청·대기·받기는 core/kie-api 한 곳
 //   원격 API 라 로컬 GPU 레인을 잡지 않는다 · 동시 3개(kie 한도 10초에 20건 안쪽) · 크레딧 부족이면 남은 것을 만들지 않고 멈춘다.
 // 목록·로그에는 서비스 이름(kie)을 보이지 않는다(로이 2026-10-17 — 판매용) · 키 칸은 회원에게도 열려 있다(v0.9.76 — 회원이 본인 kie 키를 넣는다)
@@ -4753,137 +4513,9 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
   if (!cfg.cloud) { log('  🧹 로컬 VRAM 반납(모델 언로드) — TTS 가 쓸 자리를 비웁니다'); await eng.freeMemory(); }
 }
 
-// 비디오 생성 디스패치 — 'grok-api'=REST API, 'comfy[::path]'=ComfyUI i2v, 그 외('grok'/'grok10')=브라우저 Grok.
-//   ⚠ 절전 차단으로 감싼다 — i2v 는 수 분~수십 분이고, 브라우저 자동화(Grok)는 화면이 꺼지면 흔들린다.
+// 비디오 생성 디스패치 — 'kie:<모델>'=AI 영상, 'comfy[::path]'=ComfyUI i2v(옛 값은 engine-migrate 가 먼저 바꾼다).
+//   ⚠ 절전 차단으로 감싼다 — i2v 는 수 분~수십 분 걸린다.
 //     (TTS/이미지 큐를 안 타는 video-build·video-group 경로도 이걸로 함께 커버된다. 참조 카운트라 중첩 안전)
-// ── 🎬 Genspark 비디오 (agents?type=video_generation_agent) ─────────────────────
-//   로이 요청(2026-09-03): "비디오 생성기능에서 젠스파크를 추가해줘. 이미지 생성과 같은 개념".
-//   🔑 **이미지 순환과 같은 브라우저·같은 계정 스토어**를 쓴다 → 계정 순환·한도 쿨다운을 그대로 재사용한다.
-//   ⚠ 그래서 **Genspark 이미지와 동시에 돌 수 없다** — 같은 크롬 프로필의 같은 page 를 조작하면
-//     서로의 화면을 망가뜨린다(Flow 에서 겪은 v0.3.81 사고와 같은 계열) → gensparkBrowser 레인으로 직렬화.
-// 🎛 헤더 「③ 비디오」 옆 모델 select 가 고른 값을 **저장소(image-rotation.json)에 박는다** (2026-09-05).
-//   로이: "genspark 를 골랐을 때 그 옆에서 모델을 고르게 해 주고, 그 모델로 만들게. 아내 PC 에서는 설정한
-//   모델로 안 만들어지더라." — 모델은 ⚙ 설정 팝업(PC 별 파일)에만 있어 헤더에서 보이지 않았고, 그 PC 의
-//   파일에 무엇이 들어 있는지 알 길이 없었다. 이제 **헤더에 보이는 값 = 저장된 값 = 만드는 값** 이 한 줄로 묶인다.
-//   ⚠ 렌더러가 select 를 바꿀 때 이미 saveImgRot 로 저장하지만, 그 IPC 가 끝나기 전에 「🎬 비디오」를 누르는
-//     레이스가 있을 수 있어 **실행 인자로도 받아 여기서 한 번 더 박는다**(헤더 우선). 목록에 없는 이름도
-//     그대로 저장한다 — Genspark 목록이 바뀌었을 때 엔진이 라벨로 찾고, 못 찾으면 로그로 알리기 때문.
-function applyHeaderGsVideoModel(model) {
-  const v = String(model || '').trim();
-  if (!v) return null;
-  try {
-    const Rot = require('./core/image-rotation');
-    const cur = Rot.load().gensparkVideoModel;
-    if (cur !== v) { Rot.save({ gensparkVideoModel: v }); log(`🎛 Genspark 비디오 모델 ← 헤더 선택 「${v}」 (설정 저장값 「${cur || '없음'}」 을 갱신)`); }
-  } catch (e) { log(`⚠ Genspark 비디오 모델 저장 실패: ${String(e.message).slice(0, 80)} — 설정 저장값으로 진행`); }
-  return v;
-}
-
-async function runGensparkVideos(pr, mediaDir, onlyNums) {
-  const { GensparkEngine } = require('./genspark-engine');
-  const GensparkEngineCls = GensparkEngine;   // 정적 메서드(isPointExhausted) 호출용
-  const GsAcc = require('./core/genspark-accounts');
-  const Rot = require('./core/image-rotation');
-  const cfg = Rot.load();
-  // 🔑 모델은 **저장소 한 곳**에서만 읽는다 — 헤더 select 와 ⚙ 설정 select 가 둘 다 이 값을 쓰고,
-  //   IPC 인자로 온 헤더 값은 applyHeaderGsVideoModel 이 이미 여기에 박아 두었다(두 진실 금지).
-  const model = cfg.gensparkVideoModel || Rot.DEFAULTS.gensparkVideoModel;
-  const tier = cfg.gensparkVideoTier || 'Standard';
-
-  // 대상 — **이미지가 있는 그룹만**(i2v: 시작 프레임이 필요하다). 이미 영상이 있으면 건너뛴다(이어받기).
-  const groups = (pr.groups || []).filter((g) => {
-    if (Array.isArray(onlyNums) && onlyNums.length && !onlyNums.includes(g.num)) return false;
-    if (g.videoPath && fs.existsSync(g.videoPath)) return false;
-    return !!(g.imagePath && fs.existsSync(g.imagePath));
-  });
-  if (!groups.length) {
-    log('⏭ Genspark 비디오 — 대상 그룹 없음 (이미지가 있고 영상이 없는 그룹이 필요합니다)');
-    return {};
-  }
-
-  const accounts = GsAcc.activeAccounts();
-  if (!accounts.length) {
-    const st = imgEngineReady('genspark');
-    const till = st.until ? ` (한도 재설정 ${fmtClock(st.until)} 이후 재시도)` : '';
-    log(`⛔ Genspark 비디오 — 모든 계정 한도/쿨다운${till}`);
-    return { limitReached: true };
-  }
-
-  log(`🎬 Genspark 비디오 생성 (모델 ${model} · 등급 ${tier} · ${groups.length}개 그룹 · 계정 ${accounts[0].label})`);
-  const t0 = Date.now();
-  const durs = [];
-  let made = 0, limitReached = null;
-
-  for (const acc of accounts) {
-    if (S.abort || limitReached) break;
-    const eng = new GensparkEngine({ profileId: acc.id, logger: log });
-    try {
-      for (const g of groups) {
-        if (S.abort) { log('⏹ 중단됨'); break; }
-        if (g.videoPath && fs.existsSync(g.videoPath)) continue;
-        const out = P.claimPath(path.join(mediaDir, String(g.num).padStart(2, '0') + '.mp4'), g.videoPath);   // 🔒
-        // 길이 — 기존 비디오 방식과 같다: 그룹 TTS 길이(없으면 기본 6초). 모델별 범위는 엔진이 맞춘다.
-        const ttsSec = (pr.sentences || []).filter((x) => x.groupId === g.id)
-          .reduce((a, x) => a + (x.ttsDurationSec > 0 ? x.ttsDurationSec : 0), 0);
-        const want = ttsSec > 0 ? Math.ceil(ttsSec) : 6;
-        const prompt = String(g.videoPrompt || g.motionNote || '').trim()
-          || 'natural slow motion, subtle camera movement, cinematic';
-        g.videoStatus = 'generating'; pushDtoUpdate();
-        const gt0 = Date.now();
-        const r = await eng.generateVideoFromImage({
-          prompt, imagePath: g.imagePath, outputPath: out,
-          aspect: pr.aspect || '16:9', durationSec: want, model, tier,
-          abortSignal: () => S.abort,
-        });
-        const sec = (Date.now() - gt0) / 1000;
-        if (r && r.success) {
-          g.videoPath = r.outputPath; g.videoStatus = 'done';
-          made++; durs.push(sec);
-          log(`  ✓ G${g.num} → ${path.basename(r.outputPath)} (${_dur(sec)})`);
-        } else if (r && r.limit) {
-          g.videoStatus = 'idle';
-          limitReached = r.limitMessage || '한도';
-          // 🔑 **이미지와 성질이 다르다**(로이 2026-09-03): 이미지는 5시간 제한이라 시간이 지나면 풀리지만,
-          //   비디오는 **포인트 차감**이라 기다려도 생기지 않는다(구독 주기로 충전). Flow 의 크레딧 소진
-          //   처리(v0.3.84)와 같은 태도로 간다 — 오래 쉬게 하고 **무엇을 하면 되는지** 알린다.
-          const pointOut = GensparkEngineCls.isPointExhausted(limitReached);
-          const until = pointOut ? (Date.now() + 6 * 60 * 60 * 1000) : parseLimitResetTime(String(limitReached));
-          GsAcc.setCooldown(acc.id, until);
-          if (pointOut) {
-            log(`⛔ Genspark 계정 "${acc.label}" — 비디오 포인트가 소진된 것으로 보입니다: ${String(limitReached).slice(0, 100)}`);
-            log(`   → 기다려도 충전되지 않습니다(구독 주기). 다른 비디오 엔진으로 바꾸세요 — 헤더 「③ 비디오」 → ☁ LTX2.5(구독 GPU 시간만, 추가 과금 없음)`);
-            log(`   이 계정은 ${fmtClock(until)}까지 건너뜁니다.`);
-          } else {
-            log(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 건너뜁니다 → 다음 계정`);
-          }
-          break;
-        } else {
-          g.videoStatus = 'fail';
-          log(`  ✗ G${g.num} 실패 (${_dur(sec)}): ${(r && r.error) || '알 수 없는 오류'}`);
-        }
-        pushDtoUpdate();
-      }
-    } catch (e) {
-      log(`⚠ Genspark 비디오 오류: ${String(e.message).split('\n')[0].slice(0, 140)}`);
-    } finally {
-      try { await eng.stop(); } catch (_) {}
-    }
-    if (limitReached) { limitReached = null; continue; }   // 다음 계정으로
-    break;
-  }
-
-  // 스피너 고착 방지 — 남은 'generating' 을 정리한다(v0.2.62 계열).
-  for (const g of groups) if (g.videoStatus === 'generating') g.videoStatus = g.videoPath ? 'done' : 'fail';
-  pushDtoUpdate();
-
-  if (durs.length) {
-    const avg = durs.reduce((a, b) => a + b, 0) / durs.length;
-    log(`⏱ Genspark 영상 ${made}개 — 개당 평균 ${_dur(avg)} (최소 ${_dur(Math.min(...durs))} · 최대 ${_dur(Math.max(...durs))}) · 전체 ${_dur((Date.now() - t0) / 1000)}`);
-  }
-  if (!made) log('⚠ Genspark 비디오 — 만들어진 영상이 없습니다 (위 로그의 실패 사유를 보세요)');
-  return {};
-}
-
 async function genGroupVideos(...args) { return withAwake('비디오 생성', () => _genGroupVideosCore(...args)); }
 // 🖥 **로컬** ComfyUI i2v 는 OmniVoice TTS·로컬 이미지와 **같은 3060** 을 쓴다 → 수동 「🎬 비디오」 버튼은
 //   'localGpu' 레인을 잡아 TTS 와 겹치지 않게 한다(2026-08-20 오후 로컬 비디오 복구와 함께 추가.
@@ -4907,51 +4539,30 @@ function _warnR2vEngine(pr, onlyNums, videoEngine) {
     if (!mm) log(`⚠ 🎬 R2V 꼴 장면 ${gs.length}개(${gs.slice(0, 8).map((g) => 'G' + g.num).join('·')}${gs.length > 8 ? '…' : ''}) — 지금 비디오 도구는 인물 시트를 받지 않아 🎬 글만 넣습니다`);
   } catch (_) {}
 }
-// 🔁 ComfyUI·Genspark 를 쓰지 않는다(로이 2026-10-21 · v0.9.92) — 옛 값이 제작 입구까지 오면 AI 이미지·AI 영상으로 바꾸고 알린다(판정은 core/engine-migrate 한 곳)
+// 🔁 옛 도구 값(ComfyUI 등 · 로이 2026-10-21 · v0.9.92) — 제작 입구까지 오면 AI 이미지·AI 영상(또는 「없음」)으로 바꾸고 알린다(판정·이름은 core/engine-migrate 한 곳)
 function _logEngineMigrations(list) {
-  for (const c of (list || [])) log(`🔁 채널 「${c.name}」 ${c.kind} 도구: ${c.from} → ${require('./core/engine-migrate').toLabel(c.to)} (ComfyUI·Genspark 는 더 쓰지 않습니다)`);
+  for (const c of (list || [])) log(`🔁 채널 「${c.name}」 ${c.kind} 도구: ${c.from} → ${require('./core/engine-migrate').toLabel(c.to)} (${require('./core/engine-migrate').RETIRED_NOTE})`);
 }
 function _migImg(v, logger) {
   const EM = require('./core/engine-migrate'); const m = EM.migrateImage(v);
-  if (m.from && m.from !== '빈 값') (logger || log)(`🔁 이미지 도구 ${m.from} → ${EM.toLabel(m.v)} (ComfyUI·Genspark 는 더 쓰지 않습니다 — 헤더 「② 이미지」에서 바꿀 수 있습니다)`);
+  if (m.from && m.from !== '빈 값') (logger || log)(`🔁 이미지 도구 ${m.from} → ${EM.toLabel(m.v)} (${EM.RETIRED_NOTE} — 헤더 「② 이미지」에서 바꿀 수 있습니다)`);
   return m.v;
 }
 function _migVid(v, logger) {
   const EM = require('./core/engine-migrate'); const m = EM.migrateVideo(v);
-  if (m.from) (logger || log)(`🔁 비디오 도구 ${m.from} → ${EM.toLabel(m.v)} (ComfyUI·Genspark 는 더 쓰지 않습니다 — 헤더 「③ 비디오」에서 바꿀 수 있습니다)`);
+  if (m.from) (logger || log)(`🔁 비디오 도구 ${m.from} → ${EM.toLabel(m.v)} (${EM.RETIRED_NOTE} — 헤더 「③ 비디오」에서 바꿀 수 있습니다)`);
   return m.v;
 }
 async function _genGroupVideosCore(pr, mediaDir, onlyNums, videoEngine) {
   videoEngine = _migVid(videoEngine);
   _warnR2vEngine(pr, onlyNums, videoEngine);
-  if (videoEngine === 'grok-api') { await runGrokApiVideos(pr, mediaDir, onlyNums); return {}; }
   if (require('./core/kie-models').isKieVal(videoEngine)) { await runKieVideos(pr, mediaDir, onlyNums, videoEngine); return {}; }
   if (isComfyVal(videoEngine)) { await runComfyVideos(pr, mediaDir, onlyNums, comfyWfOf(videoEngine)); return {}; }
-  // Genspark 비디오 — 브라우저. **이미지 순환과 같은 크롬 프로필**을 쓰므로 전용 레인으로 직렬화한다.
-  if (videoEngine === 'genspark') {
-    await _runOnLanes(['gensparkBrowser'], 'Genspark 비디오', () => runGensparkVideos(pr, mediaDir, onlyNums));
-    return {};
-  }
+  if (!videoEngine || videoEngine === 'none') { log('⏭ 비디오 도구 「없음」 — 영상을 만들지 않습니다(이미지로 진행)'); return {}; }
   // 🗑 Flow(Veo)는 v0.9.67 에 지웠다(로이 2026-10-17) — 옛 저장값이면 알리고 건너뛴다(조용히 다른 엔진으로 만들지 않는다)
   if (videoEngine === 'flow') { log('⏭ Flow 비디오는 삭제됐습니다 — 헤더 「③ 비디오」에서 다른 도구를 고르세요(이번엔 이미지로 진행)'); return {}; }
-  return P.generateHookVideosGrok(pr, mediaDir, log, () => S.abort, 0, pushDtoUpdate, onlyNums, grokDurOf(videoEngine));
-}
-
-// 🔁 이미지 순환 엔진의 지금 상태 — 「지금 쓸 수 있나 · 아니면 언제 풀리나」.
-//   { ok:true }            = 지금 쓸 수 있다
-//   { ok:false, until:ts } = 그 시각(한도 재설정)이 지나면 다시 쓸 수 있다  ← 라운드 재시도 대상
-//   { ok:false, until:0 }  = 시간이 지나도 안 풀린다(오늘 일일 캡 소진 등) → 다시 시도해도 헛수고
-//   ⚠ 조회에 실패하면 { ok:true }(fail-open) — 판정 때문에 생성이 막히면 본말전도다.
-function imgEngineReady(engineId) {
-  try {
-    if (engineId === 'genspark') {
-      const A = require('./core/genspark-accounts');
-      if (A.activeAccounts().length) return { ok: true, until: 0 };
-      const ts = A.list().accounts.map((a) => A.cooldownUntil(a.id)).filter((t) => t > 0);
-      return { ok: false, until: ts.length ? Math.min(...ts) : 0 };
-    }
-  } catch (e) { /* 조회 실패 = 막지 않는다 */ }
-  return { ok: true, until: 0 };
+  log(`⏭ 알 수 없는 비디오 도구 「${videoEngine}」 — 헤더 「③ 비디오」에서 다시 고르세요(이번엔 이미지로 진행)`);
+  return {};
 }
 
 async function runRotatingImages(project, imagesDir, logger, styleId, startEngine, onlyNums, retryLevel = 0, force = false) {
@@ -4977,112 +4588,7 @@ async function runRotatingImages(project, imagesDir, logger, styleId, startEngin
   }
   if (require('./core/kie-models').isKieVal(startEngine)) return runKieImages(project, imagesDir, logger, styleId, onlyNums, startEngine, force);
   if (isComfyVal(startEngine)) return runComfyImages(project, imagesDir, logger, styleId, onlyNums, comfyWfOf(startEngine), retryLevel, force);
-  const Rot = require('./core/image-rotation');
-  const order = Rot.activeOrder(startEngine);
-  if (!order.length) { logger('⚠ 순환 엔진이 비어있음 — ⚙ 순환 설정 확인'); return; }
-  const stylePrompt = styleId ? (require('./core/style-store').getPrompt(styleId) || '') : '';
-  const need = () => project.groups.filter((g) => g.imagePrompt && g.imagePrompt.trim() && !imgDone(g, force) && (!onlyNums || onlyNums.includes(g.num)));
-  if (!need().length) { logger(noTargetMsg(onlyNums)); return; }
-  logger(`🔄 이미지 순환: ${order.join(' → ')}`);
-
-  // 🔁 **라운드 반복** — 한 바퀴(order 전부)를 돈 뒤에도 남은 이미지가 있으면, 그 사이에 **한도 재설정 시각이
-  //   지나 다시 쓸 수 있게 된 엔진**으로 돌아가 이어서 만든다. (2026-08-27 로이: "제한시간이 지난 다음에는
-  //   다시 젠스파크로 돌아가 이미지 생성 … 같은 대본에서라도 진행되면 좋겠어")
-  //   예) Genspark 한도 → Flow 가 30장을 만드는 20분 사이에 Genspark 쿨다운이 풀림 → 다음 라운드에 Genspark 복귀.
-  //   🔑 후보(cooledOut)는 **각 엔진을 시도한 직후** 기록한다 — 라운드가 끝난 뒤에 한꺼번에 재면 그 사이 이미
-  //      풀린 엔진이 후보에서 빠져(ok=true) 영영 복귀하지 못한다.
-  //   ⛔ **기다리지는 않는다** — 쿨다운이 5시간일 수 있고, 그동안 TTS/GPU 레인을 쥔 채 앱이 멎는 쪽이 더 나쁘다.
-  //      아직 안 풀렸으면 미생성으로 두고 「언제 이후에 다시 누르면 된다」를 로그로 알린다.
-  const MAX_ROUNDS = 8;        // 무한 루프 방지 상한(보통은 진전 0 또는 「아직 안 풀림」으로 그 전에 끝난다)
-  const cooledOut = new Set(); // 한도/쿨다운으로 못 쓴 채 남긴 엔진 = 다음 라운드 재시도 후보
-  for (let round = 1; round <= MAX_ROUNDS; round++) {
-    if (S.abort) { logger('⏹ 중단됨'); break; }
-    if (!need().length) break;
-    let targets = order;
-    if (round > 1) {
-      targets = order.filter((e) => cooledOut.has(e) && imgEngineReady(e).ok);
-      if (!targets.length) break; // 아직 아무도 안 풀렸다 → 여기서 끝(대기하지 않는다)
-      logger(`🔁 ${targets.join(',')} 한도 재설정 시각이 지났습니다 — 남은 ${need().length}장을 그 엔진으로 이어서 만듭니다 (${round}번째 순환)`);
-    }
-    const before = need().length;
-    for (const engineId of targets) {
-      if (S.abort) break;
-      const remaining = need();
-      if (!remaining.length) break;
-      const nums = remaining.map((g) => g.num);
-      logger(`🔄 [${engineId}] 남은 ${remaining.length}장 생성 시도 (그룹 ${nums.join(',')})`);
-      try {
-        if (engineId === 'genspark') {
-          // Genspark 멀티계정: 한 계정이 한도면 다음 계정으로, 계정 모두 소진 시 다음 엔진으로.
-          //   한도 감지 시 메시지의 '재설정 시각'을 기억(쿨다운) → 그 전엔 접속 시도 없이 바로 다음 엔진으로.
-          const GsAcc = require('./core/genspark-accounts');
-          const accounts = GsAcc.activeAccounts();
-          if (!accounts.length) {
-            const st = imgEngineReady('genspark');
-            const till = st.until ? ` (한도 재설정 ${fmtClock(st.until)} 이후 재시도)` : '';
-            logger(`⏭ Genspark 건너뜀 — 모든 계정 한도/쿨다운${till} → 다음 엔진으로`);
-          } else {
-            for (const acc of accounts) {
-              if (S.abort) break;
-              const stillNeed = need(); if (!stillNeed.length) break;
-              const ns = stillNeed.map((g) => g.num);
-              logger(`🔑 Genspark 계정: ${acc.label} — 남은 ${stillNeed.length}장`);
-              // ⚠ Genspark 비디오와 **같은 크롬 프로필**을 쓰므로 같은 레인으로 직렬화한다(동시 조작 방지).
-              const r = await _runOnLanes(['gensparkBrowser'], 'Genspark 이미지', () => P.generateImagesGenspark(project, imagesDir, logger, () => S.abort, stylePrompt, ns, pushDtoUpdate, acc.id));
-              if (r && r.ok) GsAcc.markUsed(acc.id, r.ok); // 성공분만 카운트
-              if (r && r.limitReached) {
-                if (r.limitReached === '__STALL__') {
-                  // 한도 메시지 없이 침묵 정체 — 재설정 시각을 알 수 없으니 30분 추정 쿨다운. (실제론 과부하로 더 빨리 풀릴 수도)
-                  const until = Date.now() + 30 * 60 * 1000;
-                  GsAcc.setCooldown(acc.id, until);
-                  logger(`⏸ Genspark 계정 "${acc.label}" 침묵 정체(무응답) — ${fmtClock(until)}까지 건너뜀(추정, 메시지 없음) → 다음 계정/엔진으로`);
-                } else {
-                  const until = parseLimitResetTime(typeof r.limitReached === 'string' ? r.limitReached : '');
-                  GsAcc.setCooldown(acc.id, until);
-                  logger(`⏸ Genspark 계정 "${acc.label}" 한도 — ${fmtClock(until)}까지 이 계정 건너뜀(재설정 시각 기억) → 다음 계정/엔진으로`);
-                }
-                continue;
-              }
-              break; // 한도가 아닌 이유로 끝남(나머지는 차단/실패) → Genspark 더 시도 무의미
-            }
-          }
-        } else if (engineId === 'gemini') {
-          await runGeminiImages(project, imagesDir, logger, styleId, nums, force);
-        } else { logger(`(건너뜀) 알 수 없는 엔진: ${engineId}`); }
-      } catch (e) {
-        logger(`⚠ ${engineId} 중단(${e.message}) — 다음 엔진으로 이어감`);
-      }
-      // 🔑 시도 **직후** 판정 — 지금 한도/쿨다운이면 다음 라운드 복귀 후보로 남긴다(풀리면 되돌아온다).
-      const st = imgEngineReady(engineId);
-      if (!st.ok && st.until > 0) cooledOut.add(engineId); else cooledOut.delete(engineId);
-    }
-    if (round > 1 && need().length === before) break; // 다시 시도했는데 한 장도 못 만들었다 → 헛돌기 방지
-  }
-
-  const left = need();
-  if (left.length) {
-    const waits = order.map((e) => ({ e, st: imgEngineReady(e) })).filter((x) => !x.st.ok && x.st.until > 0);
-    const till = waits.length
-      ? ` — ${fmtClock(Math.min(...waits.map((x) => x.st.until)))} 이후에 「🖼 이미지」를 다시 누르면 ${waits.map((x) => x.e).join('·')} 로 이어서 만듭니다`
-      : '';
-    logger(`⚠ 순환 엔진 모두 소진 — ${left.length}장 미생성 (그룹 ${left.map((g) => g.num).join(',')})${till}`);
-  } else logger('✅ 순환 이미지 생성 완료');
-  collectForLora(project, styleId, logger); // 📦 Genspark/Flow 이미지를 LoRA 데이터셋에 적립
-}
-
-// 📦 LoRA 학습용 데이터셋 적립 — Genspark/Flow 이미지만(ComfyUI 제외), 중복은 해시로 1회.
-function collectForLora(project, styleId, logger) {
-  let Lora; try { Lora = require('./core/lora-collect'); } catch { return; }
-  if (!Lora.load().enabled) return;
-  let n = 0;
-  for (const g of project.groups) {
-    if (!g.imagePath || !fs.existsSync(g.imagePath)) continue;
-    if (g.imageEngine === 'comfy') continue;          // ComfyUI 결과는 학습 오염 방지로 제외
-    if (!g.imagePrompt || !g.imagePrompt.trim()) continue;
-    const r = Lora.collect({ imagePath: g.imagePath, prompt: g.imagePrompt, styleId, script: (S.parsed && S.parsed.fileTitle) || '', num: g.num, engine: g.imageEngine || null });
-    if (r && r.added) n++;
-  }
-  if (n && logger) logger(`📦 LoRA 수집: ${n}장 적립 (총 ${Lora.count()}장)`);
+  (logger || log)(`⚠ 알 수 없는 이미지 도구 「${startEngine}」 — 헤더 「② 이미지」에서 다시 고르세요`);
 }
 
 
@@ -5143,7 +4649,7 @@ function pushDtoUpdate() {
   try { if (win && !win.isDestroyed() && S.parsed && _vw) { const d = _mst ? WORLD.run('longform', currentDTO) : currentDTO(); if (d) { d.timings = { ...S.timings }; d.queue = queueDTO(); win.webContents.send('dto-update', d); } } } catch {}
   scheduleAutoSave(); // 데이터가 바뀔 때마다(디바운스) 자동저장
 }
-// 중단·종료 시 '생성 중' 스피너 고착 해제 — 어느 엔진 경로든(comfy 순차·genspark 배치·flow) 실제로 만들다 만 그룹의
+// 중단·종료 시 '생성 중' 스피너 고착 해제 — 어느 엔진 경로든(comfy 순차·AI 이미지 동시) 실제로 만들다 만 그룹의
 //   imageStatus/videoStatus 가 'generating'|'upscaling' 에 남으면 카드에 스피너가 영원히 돈다. 모든 큐의 전 그룹을 훑어
 //   자산 있으면 'done', 없으면 'idle' 로 정리한다. (in-flight 배치가 곧 끝나면 그때 done/fail 로 다시 갱신 — 무해)
 function clearGeneratingStatus() {
@@ -5234,7 +4740,7 @@ function hasVisual(g) {
 //     media-1/01.mp4 가 있어 🔄 가 **1초 만에** 실패했고, 같은 시각 영상 없는 [다산_0829] G1 은 30초 걸려
 //     정상 생성됐다. 로그가 「엔진 한도·오류·결제 확인」이라 원인을 한도로 오도하기까지 했다).
 //   ⇒ force 면 **이미지 유무만** 본다. 평소 경로(만들기 2단계)는 그대로 = 영상 있는 그룹은 안 만든다.
-//   ⚠ Genspark(core/pipeline.generateImagesGenspark)는 원래부터 이미지 유무만 봤다 — 나머지 엔진을 그쪽에 맞춘다.
+//   ⚠ 옛 브라우저 엔진은 원래부터 이미지 유무만 봤다 — 나머지 엔진을 그쪽에 맞췄다.
 function imgDone(g, force) {
   if (!force && g._covered) return true;   // 🖼 앞 그룹 그림이 아래층으로 이어져 보이는 그룹 — 새로 만들지 않는다(🔄 는 force 라 만든다)
   if (g.imageStale) return false;
@@ -5265,7 +4771,7 @@ async function _maybeUpscaleCore(project, logger, enabled) {
   const cand = project.groups.filter((g) => g.videoPath && fs.existsSync(g.videoPath) && !/_1080\.mp4$/i.test(g.videoPath));
   // 이미 목표 해상도 이상이면 업스케일할 이유가 없다 — comfy 가 처음부터 1080p 로 뽑기 시작했으므로
   //   (comfy-video._videoDims) 새 영상은 여기서 전부 걸러진다. 옛 저해상도(1280x704) 영상이나 다른
-  //   엔진(Grok 등) 결과는 그대로 업스케일된다. 해상도로 판단하므로 설정을 되돌려도 자동으로 맞는다.
+  //   엔진 결과(저해상도)는 그대로 업스케일된다. 해상도로 판단하므로 설정을 되돌려도 자동으로 맞는다.
   const MU = require('./core/media-utils');
   const targets = [];
   let already = 0;
@@ -5407,7 +4913,7 @@ async function autoFillPrompts(projects, logger) {
 }
 
 ipcMain.handle('image-build', (_e, args = {}) => {
-  const { shortsNum = null, engine = 'genspark' } = args;
+  const { shortsNum = null, engine = '' } = args;
   const styleId = effStyleId(_stageStyle(args));   // 🎨 대본 화풍 우선 · 🔀 다른 채널 대본이면 그 채널 화풍
   // 단건 재생성(regen-group)과 같은 직렬 큐 — 브라우저 충돌(진행 중 작업 강제 종료) 방지
   return enqueueImageJob(shortsNum ? `${shortsNum}편 이미지 생성` : '이미지 전체 생성', async () => {
@@ -5429,7 +4935,7 @@ ipcMain.handle('image-build', (_e, args = {}) => {
       if (imagesNeeded(pr) === 0) {
         log(`♻ ${prLabel(pr)} 전부 캐시 재활용 — 생성 생략`);
       } else {
-        await runRotatingImages(pr, mediaDir, log, styleId, engine); // Flow+Genspark 순환(한도 시 자동 이어감)
+        await runRotatingImages(pr, mediaDir, log, styleId, engine);
       }
       cacheGeneratedImages(pr, styleId, engine); // 새로 만든 이미지 캐시에 저장
       let _bLeft = 0; try { if (engine === 'gemini-batch' && S.scriptPath) _bLeft = require('./core/gemini-batch-store').pendingAllForScript(S.scriptPath).length; } catch {}
@@ -5681,20 +5187,6 @@ function warnIncompleteVisuals(incomplete) {
   } catch {}
 }
 
-// Grok 요청(전체) 한도로 작업을 멈췄을 때 안내 팝업. info = { reset }(재사용 시각 텍스트).
-function warnGrokLimit(info) {
-  log(`⛔ Grok 요청 한도로 작업 중단${info && info.reset ? ` — ${info.reset}` : ''}`);
-  try {
-    dialog.showMessageBox(win, {
-      type: 'warning',
-      title: 'Grok 요청 한도 도달 — 작업을 멈췄습니다',
-      message: 'Grok 비디오 생성 요청 한도에 도달해 더 진행하지 않고 멈췄습니다.',
-      detail: `${info && info.reset ? info.reset + ' 무렵 다시 사용할 수 있습니다.\n\n' : ''}한도가 풀린 뒤 다시 "만들기"를 누르면, 이미 만들어진 TTS·이미지·비디오는 재사용하고 빠진 비디오만 이어서 생성합니다.\n(추후: 다른 Grok 계정 또는 Flow 로 자동 전환 예정)`,
-      buttons: ['확인'],
-    });
-  } catch {}
-}
-
 // 영상화할 그룹 번호 — 범위(fromNum~toNum) 안의 그룹. 범위 미지정이면 전체 그룹.
 //   (랜덤/개수 방식은 폐지 — 사용자가 N~N 범위로 지정)
 // 큐 제작용 영상 범위 결정 — **대본마다 자기 범위**(v0.5.73, 로이: 대본마다 도입부가 다르다).
@@ -5738,7 +5230,7 @@ function _batchPreflight(plan, items, royInfo) {
   return out;
 }
 // 🔗 영상 참조가 비었는데 출력 폴더(media-N)에 그 그룹 번호의 영상이 남아 있으면 다시 잇는다(v0.5.49 · 아내 PC 실사고).
-//   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(Grok·Comfy 크레딧 보호).
+//   「만들기」가 이미 만든 영상을 또 만들지 않게 — 비디오 단계 **직전에** 부른다(AI 영상 크레딧 보호).
 //   ⚠ ✕ 로 지운 영상(videoCleared)은 파일이 남아 있어도 되살리지 않는다. 그림이 없는 그룹도 건드리지 않는다.
 function autoRelinkVideos(pr, mediaDir) {
   let n = 0;
@@ -5763,8 +5255,8 @@ function rangeNums(project, fromNum, toNum, sel = null) {
 
 ipcMain.handle('video-build', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum = null, flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', gensparkVideoModel = null } = args;
-  let { engine = 'grok' } = args;
+  const { shortsNum = null, flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate' } = args;
+  let engine = _migVid(args.engine == null ? 'none' : args.engine);   // 🔁 지운 옛 영상 도구 값은 여기서 「없음」·AI 영상으로(core/engine-migrate)
   const styleId = effStyleId(_stageStyle(args));   // 🎨 대본 화풍 우선 · 🔀 다른 채널 대본이면 그 채널 화풍
   // 🎬 큐 단계 버튼도 같은 규칙 — 다른 채널 대본의 채널 비디오가 「없음」이면 만들지 않는다(v1.0.14 · core/queue-channel)
   if (args.__item && args.headerPresetName && engine !== 'none'
@@ -5782,14 +5274,7 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     if (engine !== 'none') log(`🎬 ${(S.parsed && S.parsed.fileTitle) || ''} — 영상 범위 G${fromNum}~G${toNum} (${_rg.src})`);
   }
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
-  if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
-  // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
-  if (engine === 'grok' || engine === 'grok10') {
-    const _gc = grokCoolUntil();
-    if (_gc) { log(`⏭ Grok 한도 — ${fmtClock(_gc)}까지 영상 생성 건너뜀 (재설정 후 다시 시도)`); return P.toDTO(S.parsed); }
-  }
   resetWorkAbort();
-  S.grokLimit = null;
   const _vidT0 = Date.now();
   S.timings.video = 0;
   for (const pr of S.parsed.projects) {
@@ -5811,9 +5296,8 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     }
     try {
       {
-        if (engine === 'grok' || engine === 'grok10') log(`🎬 ${prLabel(pr)} 비디오 생성 (Grok ${grokDurOf(engine) === 'auto' ? '자동 6/10초' : grokDurOf(engine)}${rangeLbl})…`);
-        const vr = await genGroupVideosManual(pr, videoDir, onlyNums, engine, `${prLabel(pr)} 영상 생성`);
-        if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다'); }
+        log(`🎬 ${prLabel(pr)} 비디오 대상${rangeLbl}`);
+        await genGroupVideosManual(pr, videoDir, onlyNums, engine, `${prLabel(pr)} 영상 생성`);
       }
       if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       log(`✓ ${prLabel(pr)} 영상 완료`);
@@ -5822,7 +5306,6 @@ ipcMain.handle('video-build', async (_e, args = {}) => {
     }
     pushDtoUpdate(); // 생성된 영상(g.videoPath)을 UI 썸네일에 즉시 반영
   }
-  if (S.grokLimit) { warnGrokLimit(S.grokLimit); S.grokLimit = null; } // Grok 요청 한도 안내 팝업
   S.timings.video = (Date.now() - _vidT0) / 1000;
   pushDtoUpdate();
   return P.toDTO(S.parsed);
@@ -7169,14 +6652,6 @@ ipcMain.handle('tts-face-clear', (_e, { engine, voice } = {}) => {
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 });
-// xAI API 키 (secret-store 'xai') — Grok Imagine 비디오 API(grok-api 엔진)용. console.x.ai 에서 발급.
-ipcMain.handle('get-xai-key', () => {
-  try { const s = require('./tts/secret-store').get('xai'); return (s && s.key) || ''; } catch { return ''; }
-});
-ipcMain.handle('set-xai-key', (_e, key) => {
-  try { require('./tts/secret-store').set('xai', { key: String(key || '').trim() }); log('xAI API 키 저장됨'); return true; }
-  catch (e) { log('xAI 키 저장 실패: ' + e.message); return false; }
-});
 // TTS 서버 주소(OmniVoice) — PC마다 다름(LAN/Tailscale). 다른 PC에서 메인 GPU 서버를 가리키게 설정.
 ipcMain.handle('get-tts-servers', () => { try { return require('./tts/tts-config').loadAll(); } catch { return {}; } });
 ipcMain.handle('set-tts-server', (_e, args = {}) => {
@@ -8185,11 +7660,10 @@ async function runMakeAllBody(opts = {}) {
   //   이 함수 안에서 이름·제목·대본 경로가 필요한 곳은 전부 runCtx 를 넘긴다(test:runctx 가 센다).
   const scriptPath = S.scriptPath; const runCtx = { parsed, scriptPath, outRoot };
   if (!opts.dry && !(await royGate(parsed, { queue: !!opts._fromQueue, what: '만들기' }))) return;   // 🟥 미확인 경험(큐 = 던져서 그 편 실패·다음 편 계속)
-  const { shortsNum = null, engine: _engineArg = 'genspark', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine: _videoArg = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, gensparkVideoModel = null, uploadAfter = null } = opts;
+  const { shortsNum = null, engine: _engineArg = '', presetName = null, speed = null, captionStyle = null, captionMaxChars = 7, styleId: _styleArg = null, fromNum = null, toNum = null, vidSel: _vidSelArg = null, dry = false, videoEngine: _videoArg = 'none', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', aiNotice = false, openVrew = true, uploadAfter = null } = opts;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(큐에서 헤더 화풍이 와도 이 대본의 🎨 줄이 이긴다)
-  // 🔁 옛 ComfyUI·Genspark 값 → AI 이미지·AI 영상(v0.9.92) — 아래 레인·파이프라인 판정이 바뀐 값을 보게 맨 앞에서
+  // 🔁 옛 도구 값 → AI 이미지·AI 영상·「없음」(v0.9.92 · core/engine-migrate) — 아래 레인·파이프라인 판정이 바뀐 값을 보게 맨 앞에서
   const engine = _migImg(_engineArg), videoEngine = _migVid(_videoArg);
-  if (videoEngine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
   // ✏ 완성물 종류 — 'vrew'(기본) | 'whiteboard'(손그림 MP4). 4단계에서만 갈라진다(1~3단계는 같다).
   const outTarget = normOutTarget(opts.outTarget);
   // 🔴 출력 방식 — 「전체 / 🎤 음성만 / 🖼 화면만」. 게이트뿐 아니라 **단계 자체를 건너뛴다**:
@@ -8213,7 +7687,6 @@ async function runMakeAllBody(opts = {}) {
     if (!ok) throw new Error(`TTS 엔진 '${TtsEngines.resolveEngine(_pv)}' 미가동 (서버 또는 API 키 확인)`);
     ttsMgr = mgr;
   }
-  S.grokLimit = null; // 이번 실행 중 Grok 요청 한도 감지 여부(감지 시 작업 중단 + 팝업)
   try { fs.mkdirSync(outRoot, { recursive: true }); } catch {}
   // 프롬프트 없는 그룹(prose 대본) → 이미지 전에 API로 자동 생성 (내용 맞는 이미지)
   if (!dry) { await autoFillPrompts(parsed.projects.filter((p) => !shortsNum || p.shortsNum === shortsNum), log); }
@@ -8225,8 +7698,8 @@ async function runMakeAllBody(opts = {}) {
   const projects = parsed.projects.filter((pr) => !shortsNum || pr.shortsNum === shortsNum);
 
   // ── 1·2단계: 음성(TTS) + 이미지 ──
-  //   이미지가 로컬 GPU 를 안 쓰므로(Genspark/Flow 브라우저, 나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
-  // 이미지가 로컬 GPU 를 쓰는지 — 순환(Genspark/Flow 브라우저)·나노바나나(API)·ComfyUI **클라우드** 는 안 쓴다.
+  //   이미지가 로컬 GPU 를 안 쓰면(AI 이미지·나노바나나 API) TTS(로컬 GPU)와 '병렬' → 더 빠름.
+  // 이미지가 로컬 GPU 를 쓰는지 — AI 이미지·나노바나나(API)·ComfyUI **클라우드** 는 안 쓴다.
   //   🔴 ComfyUI **로컬** 은 쓴다(2026-08-20): 그러면 이미지가 OmniVoice TTS 와 **같은 3060 을 다툰다** →
   //     TTS 가 느려지고(실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐) VRAM 이 빠듯해진다.
   //     예전엔 `noLocalGpuImg = true` 로 **하드코딩**돼 있어 로컬 이미지를 골라도 병렬로 돌았다.
@@ -8236,12 +7709,7 @@ async function runMakeAllBody(opts = {}) {
   const canParallel = !dry && !_imgLocalGpu;
 
   // ── 3단계 파이프라인 조건 ──
-  //   Grok 비디오는 별도 크롬 프로필이라 이미지 브라우저(Genspark/Flow)와 충돌하지 않음 → 그룹 이미지(+그룹 TTS)가
-  //   준비되는 즉시 그 그룹 영상을 시작(TTS∥이미지∥비디오 겹침). ('없음'은 파이프라인 대상 아님)
-  const grokVideoPipeline = videoEngine === 'grok' || videoEngine === 'grok10';
-  // Grok 한도 쿨다운 중이면 이번 실행에선 영상 생략(이미지만) — 헛되이 브라우저 띄우지 않음. 한도 풀린 뒤 영상만 이어서.
-  const _grokCool = grokVideoPipeline ? grokCoolUntil() : 0;
-  if (_grokCool) log(`⏭ Grok 한도 — ${fmtClock(_grokCool)}까지 영상 생략(이미지만 생성). 한도 풀린 뒤 '만들기'를 다시 누르면 빠진 영상만 이어서 만듭니다.`);
+  //   그룹 이미지(+그룹 TTS)가 준비되는 즉시 그 그룹 영상을 시작(TTS∥이미지∥비디오 겹침). ('없음'은 파이프라인 대상 아님)
   // ComfyUI 클라우드 비디오도 파이프라인에 포함(로이 2026-08-12) — comfy 는 **클라우드**에서 돌아
   //   로컬 GPU(TTS)와 자원이 겹치지 않으므로 TTS 와 동시에 돌려도 서로 느려지지 않는다.
   //   실측 근거: 대본마다 TTS 가 끝난 뒤에야 비디오를 시작해 편당 약 1.2분(5편 5.2분) 동안 TTS 서버가 놀았다.
@@ -8256,14 +7724,14 @@ async function runMakeAllBody(opts = {}) {
   const _pipeBase = !dry;
   // 🔑 화이트보드는 **그룹 이미지만** 쓴다(영상 트랙이 없다) → 비디오를 만들면 시간·크레딧만 버린다.
   const _wbTarget = (outTarget === 'whiteboard');
-  const videoPipeline = _pipeBase && !_wbTarget && ((canParallel && grokVideoPipeline) || comfyVideoPipeline);
+  const videoPipeline = _pipeBase && !_wbTarget && comfyVideoPipeline;
   const needTtsForVideo = true; // 그룹 TTS 길이로 영상 길이를 정함
   let ttsStageDone = false, imageStageDone = false;
   const vidSel = VSel.normSel(_vidSelArg);
   _mk = _mkStart(projects, { fromNum, toNum, sel: vidSel }, parsed.fileTitle || '', {
     tts: skipTts ? 'Vrew 에서' : '',
     image: skipVisual ? '음성만 출력' : '',
-    video: skipVisual ? '음성만 출력' : _wbTarget ? '화이트보드는 그림만' : videoEngine === 'none' ? '비디오 없음' : _grokCool ? 'Grok 한도' : '',
+    video: skipVisual ? '음성만 출력' : _wbTarget ? '화이트보드는 그림만' : videoEngine === 'none' ? '비디오 없음' : '',
   });
 
   const ttsStage = async () => {
@@ -8311,7 +7779,7 @@ async function runMakeAllBody(opts = {}) {
       const t0 = Date.now();
       try {
         if (imagesNeeded(pr) > 0) {
-          await runRotatingImages(pr, dirs.media, log, styleId, engine); // Flow+Genspark 순환
+          await runRotatingImages(pr, dirs.media, log, styleId, engine);
         }
       } catch (e) { log(`${prLabel(pr)} 이미지 오류: ${e.message}`); }
       cacheGeneratedImages(pr, styleId, engine);
@@ -8323,9 +7791,8 @@ async function runMakeAllBody(opts = {}) {
   };
 
   // 그룹별 비디오 파이프라인 — 이미지(+필요 시 그 그룹 TTS)가 준비된 그룹부터 즉시 영상 생성.
-  //   Comfy 클라우드 = 그룹 단건씩 / Grok = 준비된 그룹을 모아 배치(브라우저 기동 오버헤드 절약).
+  //   준비된 그룹을 편(pr)별로 모아 한 번에 넘긴다.
   const videoStage = async () => {
-    if (_grokCool) return; // Grok 쿨다운 — 영상 단계 건너뜀
     _mk && _mk.begin('video');
     try { await _videoPipeLoop(); } finally { _mk && _mk.end('video'); }
   };
@@ -8345,10 +7812,7 @@ async function runMakeAllBody(opts = {}) {
       else if (have) log(`🎬 영상 ${have}/${total}개는 이미 있음 — 없는 ${total - have}개만 만듭니다`);
     }
     const ttsReady = (pr, g) => {
-      // Grok 'auto' 는 그룹 TTS 합으로 6s/10s 를 정하므로 TTS 필요. 고정(10s)이면 불필요.
-      if (grokVideoPipeline) {
-        if (grokDurOf(videoEngine) !== 'auto') return true;
-      } else if (!needTtsForVideo) return true;
+      if (!needTtsForVideo) return true;
       const ss = pr.getSentencesOfGroup(g);
       return ss.length > 0 && ss.every((s) => s.ttsDurationSec != null);
     };
@@ -8370,7 +7834,7 @@ async function runMakeAllBody(opts = {}) {
         await new Promise((r) => setTimeout(r, 400));
         continue;
       }
-      // 편(pr)별로 묶어 배치 처리 — Grok 은 호출당 브라우저를 새로 띄우므로 모아서 한 번에.
+      // 편(pr)별로 묶어 처리
       const byPr = new Map();
       for (const x of ready) { if (!byPr.has(x.pr)) byPr.set(x.pr, []); byPr.get(x.pr).push(x.g); }
       for (const [pr, gs] of byPr) {
@@ -8380,10 +7844,9 @@ async function runMakeAllBody(opts = {}) {
         const dirs = shortsDirs(outRoot, pr.shortsNum);
         const t0 = Date.now();
         try {
-          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지·음성 준비 — 즉시 비디오 생성(파이프라인·${comfyVideoPipeline ? 'Comfy 클라우드' : 'Grok'})…`);
-          // 엔진 분기는 genGroupVideos 가 담당(grok / grok-api / comfy[::path]) — Grok 은 기존과 동일 호출.
-          const vr = await genGroupVideos(pr, dirs.media, nums, videoEngine);
-          if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+          log(`🎬 G${nums.join(',G')} (${prLabel(pr)}) 이미지·음성 준비 — 즉시 비디오 생성(파이프라인·Comfy 클라우드)…`);
+          // 엔진 분기는 genGroupVideos 가 담당
+          await genGroupVideos(pr, dirs.media, nums, videoEngine);
           if (!S.abort) await maybeUpscale(pr, log, true);
         } catch (e) { log(`G${nums.join(',G')} 영상 실패: ${e.message}`); }
         S.timings.video += (Date.now() - t0) / 1000;
@@ -8407,10 +7870,10 @@ async function runMakeAllBody(opts = {}) {
     log('  🖥 이미지가 로컬 ComfyUI 라 TTS 와 동시에 돌리지 않습니다 — 같은 GPU 를 다투면 TTS 가 크게 느려집니다.');
     await Promise.all([(async () => { await ttsStage(); if (!S.abort) await imageStage(); })(), videoStage()]);
   } else if (videoPipeline) {
-    log(`⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, ${grokVideoPipeline ? 'Grok' : 'Comfy 클라우드'})`);
+    log(`⚡ 1·2·3단계 파이프라인 — TTS ∥ 이미지 ∥ 비디오(그룹 이미지 준비 즉시, Comfy 클라우드)`);
     await Promise.all([ttsStage(), imageStage(), videoStage()]);
   } else if (canParallel) {
-    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(순환, 로컬 GPU 비충돌)`);
+    log(`⚡ 1·2단계 병렬 — TTS ∥ 이미지(로컬 GPU 비충돌)`);
     await Promise.all([ttsStage(), imageStage()]);
   } else {
     await ttsStage();
@@ -8424,8 +7887,6 @@ async function runMakeAllBody(opts = {}) {
     log('🎬 3단계 — 화이트보드는 그룹 이미지만 씁니다 — 비디오 건너뜀 (시간·크레딧 절약)');
   } else if (videoEngine === 'none') {
     log('🎬 3단계 — 비디오 없음(이미지만) — 건너뜀');
-  } else if (_grokCool) {
-    log(`🎬 3단계 — Grok 한도(${fmtClock(_grokCool)} 재설정)로 영상 생략 — 이미지만 사용`);
   } else if (videoPipeline) {
     log('🎬 3단계 — 파이프라인에서 그룹별로 이미 생성 완료');
   } else if (!dry && !S.abort) {
@@ -8441,8 +7902,7 @@ async function runMakeAllBody(opts = {}) {
       if (!vOnly.length) { log(`🎬 ${prLabel(pr)} 영상 범위 ${vOnly0.length}개 모두 이미 있음 — 건너뜀`); continue; }
       const t0 = Date.now();
       try {
-        const vr = await genGroupVideos(pr, dirs.media, vOnly, videoEngine);
-        if (vr && vr.limitReached) { S.grokLimit = { reset: (vr && vr.reset) || '' }; recordGrokCooldown(vr); S.abort = true; log('⛔ Grok 요청 한도 도달 — 작업을 멈춥니다 (한도 풀린 뒤 다시 만들기)'); }
+        await genGroupVideos(pr, dirs.media, vOnly, videoEngine);
         if (!S.abort) await maybeUpscale(pr, log, true); // 모든 영상 1080p 업스케일 (중단 시 생략)
       } catch (e) { log(`${prLabel(pr)} 영상 실패: ${e.message}`); }
       S.timings.video += (Date.now() - t0) / 1000;
@@ -8503,7 +7963,7 @@ async function runMakeAllBody(opts = {}) {
     const noTts = [];
     for (const pr of projects) {
       if (S.abort) break;
-      if (!dry && !skipVisual && !wbGo && videoEngine !== 'none' && !_grokCool) {
+      if (!dry && !skipVisual && !wbGo && videoEngine !== 'none') {
         const missing = rangeNums(pr, fromNum, toNum, vidSel).filter((n) => !hasVideoFile(pr.groups.find((g) => g.num === n) || {}));
         if (missing.length) { outputIncomplete = `영상 미생성 그룹 ${missing.length}개 (G${missing.join(', G')})`; log(`⛔ ${prLabel(pr)} — ${outputIncomplete} → 최종 출력 보류`); continue; }
       }
@@ -8588,7 +8048,6 @@ async function runMakeAllBody(opts = {}) {
   } else {
     log('⏹ 중단됨 — .vrew 생성 및 이후 작업 생략');
   }
-  if (S.grokLimit) { warnGrokLimit(S.grokLimit); S.grokLimit = null; } // Grok 요청 한도로 멈춘 경우 안내 팝업
   if (ttsMgr) { try { await ttsMgr.stop(); } catch {} }
   S.timings.make = (Date.now() - _makeT0) / 1000;
   pushDtoUpdate();
@@ -8695,12 +8154,11 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
     try {
       // 이미지·비디오 생성 도구는 **헤더(공통=큐 단위) 우선** — "어느 서비스/GPU로 만드냐"는 큐 전체 공통 선택이라,
       //   헤더에서 고른 도구(예 ComfyUI Krea2)를 큐 전 항목에 적용한다. 헤더값이 없을 때만 항목 저장값 폴백.
-      //   (예전엔 항목별 stale 값이 우선이라, 이어받기한 대본이 옛 순환/genspark 로 되돌아가던 문제 — 로이 결정 2026-07-22.)
-      //   제거된 영상엔진(wan/grok10)은 grok 으로 보정. (comfy::path·grok-api·flow 는 그대로)
-      //   ⚠ 'flow' 를 여기 넣지 말 것 — 2026-08-28 에 Flow·Veo 비디오가 부활했다. 넣으면 헤더에서 골라도 조용히 Grok 으로 만든다(v0.3.50 과 같은 계열의 사고).
-      const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'grok');
-      const _ve0 = (['wan', 'grok', 'grok10', 'grok-api', 'flow'].includes(rawVe)) ? 'none' : rawVe;   // 🗑 Flow 도 v0.9.67 에 지웠다   // 🎬 Grok 항목은 UI 에서 뺐다(2026-10-07) — 옛 저장값은 「없음(이미지만)」
-      const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || 'genspark');
+      //   (예전엔 항목별 stale 값이 우선이라, 이어받기한 대본이 옛 도구로 되돌아가던 문제 — 로이 결정 2026-07-22.)
+      //   🗑 지운 옛 영상 도구는 core/engine-migrate 가 「없음(이미지만)」으로 읽는다 · Flow 도 v0.9.67 에 지웠다 → 「없음」
+      const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'none');
+      const _ve0 = rawVe === 'flow' ? 'none' : require('./core/engine-migrate').migrateVideo(rawVe).v;
+      const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || '');
       // 🔴 채널(목소리)은 **항목값 우선 → 헤더 폴백**. 둘 다 없으면 getPreset(null)=기본 채널이 되어
       //   **엉뚱한 목소리로 조용히 합성**된다(2026-08-31 실사고). 배속·AI고지도 같은 구멍이라 함께 폴백한다.
       const _pn = s.presetName || common.presetName || null;
@@ -8724,8 +8182,6 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
         // ⚠ 영상 범위 = **대본마다 자기 범위**(_itemRange) — 헤더 범위를 모든 대본에 덮지 않는다(v0.5.73).
         fromNum: _rg.fromNum, toNum: _rg.toNum, vidSel: _rg.sel || '',
         videoEngine: ve, flowVideoModel: common.flowVideoModel || s.flowVideoModel || 'Veo 3.1 - Lite', flowCount: common.flowCount || s.flowCount || 'x1',
-        // 🎛 Genspark 비디오 모델도 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
-        gensparkVideoModel: common.gensparkVideoModel || s.gensparkVideoModel || null,
         captionStyle: ('captionStyle' in _ov ? _ov.captionStyle : (common.captionStyle || null)), captionMaxChars: (_ov.captionMaxChars || common.captionMaxChars || 7),
         aiNotice: (s.aiNotice != null ? !!s.aiNotice : !!common.aiNotice), // AI 고지 — 항목값 없으면 헤더값
         // ⚠ 출력 방식은 **헤더(공통) 우선** — 이미지·비디오 도구와 같은 성격(큐 전체 공통, v0.3.61 정책).
@@ -9956,15 +9412,10 @@ ipcMain.handle('set-group-prompt', (_e, args = {}) => {
 // 그룹 1개만 영상 변환 (이미지 → i2v)
 ipcMain.handle('video-group', async (_e, args = {}) => {
   if (!S.parsed) throw new Error('대본을 먼저 여세요.');
-  const { shortsNum, groupNum, engine = 'grok', flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null, gensparkVideoModel = null } = args;
+  const { shortsNum, groupNum, flowVideoModel = 'Veo 3.1 - Lite', flowCount = 'x1', upscale = false, imgEngine = 'rotate', styleId: _styleArg = null } = args;
+  const engine = _migVid(args.engine == null ? 'none' : args.engine);   // 🔁 지운 옛 영상 도구 값은 「없음」·AI 영상으로(core/engine-migrate)
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선
   if (engine === 'none') { log('비디오 엔진 "없음" — 이미지만 사용, 비디오 생성 안 함'); return P.toDTO(S.parsed); }
-  if (engine === 'genspark') applyHeaderGsVideoModel(gensparkVideoModel);
-  // Grok(브라우저) 한도 쿨다운 중이면 브라우저 접속 없이 건너뜀 (grok-api/comfy 는 해당 없음)
-  if (engine === 'grok' || engine === 'grok10') {
-    const _gc = grokCoolUntil();
-    if (_gc) { log(`⏭ Grok 한도 — ${fmtClock(_gc)}까지 영상 생성 건너뜀 (재설정 후 다시 시도)`); return P.toDTO(S.parsed); }
-  }
   const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
   const g = pr && pr.groups.find((x) => x.num === groupNum);
   if (!g) return P.toDTO(S.parsed);
@@ -9984,10 +9435,8 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
     if (!g.imagePath || !fs.existsSync(g.imagePath)) { log(`G${groupNum}: 이미지 생성 실패 — 영상 생략`); return P.toDTO(S.parsed); }
   }
   log(`🎬 G${groupNum} 영상 생성 (${engine})…`);
-  // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상·캐시 비우기.
+  // 단일 그룹 재생성 = 강제 새로 만들기 → 기존 영상 비우기.
   try {
-    const MC = require('./core/media-cache');
-    MC.del(MC.videoKey(g.videoPrompt || g.motionNote || '', g.imagePath, pr.aspect || '9:16', 'grok'));
     g.videoPath = null; g.videoStatus = 'generating'; pushDtoUpdate();
   } catch {}
   try {
@@ -10004,12 +9453,12 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 //   레인 3개를 두고, 한 작업이 필요한 레인을 **함께** 잡는다(앞선 작업이 다 끝난 뒤 실행).
 //     · tts      — 공용 TTS 매니저(getInstance 싱글톤) 보호. 두 작업이 겹치면 한쪽의 refreshProvider·
 //                  mgr.stop() 이 다른 쪽 provider 를 없애 'TTS provider not available' 로 죽는다.
-//     · image    — 같은 브라우저(Flow/Genspark) 보호. 겹치면 먼저 것이 강제 종료된다("Target page … closed").
+//     · image    — 이미지 생성 직렬화(같은 그룹을 두 작업이 동시에 그리지 않게).
 //     · localGpu — 🔴 **내 PC GPU(3060) 보호**(2026-08-20 로이 지적). OmniVoice TTS 와 **로컬 ComfyUI 이미지**는
 //                  같은 카드를 쓴다 → 동시에 돌면 VRAM 이 빠듯해지고(OOM 위험) TTS 가 크게 느려진다
 //                  (실측 계열: 로컬 업스케일 ∥ TTS = TTS 1.8배 느려짐). 예전엔 TTS 큐와 이미지 큐가 **별개**라
 //                  「🎤 TTS」 누른 뒤 「🖼 이미지」를 누르면 그대로 동시에 돌았다.
-//                  ⚠ 이미지가 순환(브라우저)·나노바나나(API)·ComfyUI **클라우드** 면 로컬 GPU 를 안 쓰므로
+//                  ⚠ 이미지가 AI 이미지·나노바나나(API)·ComfyUI **클라우드** 면 로컬 GPU 를 안 쓰므로
 //                    이 레인을 잡지 않는다(예전처럼 TTS 와 병렬 = 더 빠름).
 //   앞 작업이 실패해도 다음 작업은 실행한다(allSettled).
 //     · upscale  — 🔴 **영상 업스케일 직렬화**(2026-08-26 아내 PC 실사고). maybeUpscale 은 파이프라인의
@@ -10019,16 +9468,14 @@ ipcMain.handle('video-group', async (_e, args = {}) => {
 //                  실제 로그: `⬆ [1/3] G1` 이 도는 중에 `⬆ [1/4] G1` 이 또 시작됐다. GPU 없는 PC 에선 치명적.
 //                  ⚠ **localGpu 를 잡지 않는다** — make-all 이 이미 그 레인을 쥔 채 내부에서 부르므로
 //                    자기 자신을 기다려 교착된다(enqueueImageJob 과 같은 규칙).
-// ⚠ gensparkBrowser — Genspark 이미지 순환과 비디오는 **같은 크롬 프로필의 같은 page** 를 쓴다.
-//   동시에 돌면 서로의 화면을 조작해 깨진다(Flow 에서 겪은 v0.3.81 과 같은 계열) → 직렬화한다.
-const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), gensparkBrowser: Promise.resolve(), whiteboard: Promise.resolve() };
-const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, gensparkBrowser: 0, whiteboard: 0 };
+const _LANES = { tts: Promise.resolve(), image: Promise.resolve(), localGpu: Promise.resolve(), upscale: Promise.resolve(), whiteboard: Promise.resolve() };
+const _lanePending = { tts: 0, image: 0, localGpu: 0, upscale: 0, whiteboard: 0 };
 function _runOnLanes(lanes, label, fn) {
   const prev = lanes.map((k) => _LANES[k]);
   for (const k of lanes) _lanePending[k]++;
   const busy = lanes.filter((k) => _lanePending[k] > 1);
   if (busy.length) {
-    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일', gensparkBrowser: 'Genspark 브라우저', whiteboard: '화이트보드 렌더' };
+    const ko = { tts: 'TTS', image: '이미지', localGpu: '내 PC GPU', upscale: '영상 업스케일', whiteboard: '화이트보드 렌더' };
     log(`⏳ ${label} — ${busy.map((k) => ko[k]).join('·')} 작업이 끝난 뒤 시작합니다 (앞에 ${Math.max(...busy.map((k) => _lanePending[k])) - 1}건)`);
   }
   const p = Promise.allSettled(prev).then(() => withAwake(label, () => { const ctx = workContext.getStore(); if (ctx) ctx.start(); return fn(); }));
@@ -10044,7 +9491,7 @@ function _imgUsesLocalGpu(engine) {
   try { return !require('./core/comfy-image').loadConfig().cloud; } catch { return false; }
 }
 // 비디오 엔진이 **내 PC GPU** 를 쓰는지 — ComfyUI i2v 이면서 클라우드가 아닐 때만 참.
-//   (Grok·Grok API 는 브라우저/원격이라 로컬 GPU 와 무관 → false.)
+//   (AI 영상은 원격이라 로컬 GPU 와 무관 → false.)
 function _vidUsesLocalGpu(engine) {
   if (!isComfyVal(engine)) return false;
   try { return !require('./core/comfy-video').loadConfig().cloud; } catch { return false; }
@@ -10161,7 +9608,7 @@ function enqueueTtsJob(label, fn) {
 }
 
 ipcMain.handle('regen-group', (_e, args = {}) => {
-  const { shortsNum, groupNum, styleId: _styleArg = null, engine = 'genspark' } = args;
+  const { shortsNum, groupNum, styleId: _styleArg = null, engine = '' } = args;
   const styleId = effStyleId(_styleArg);   // 🎨 대본 화풍 우선(한 장만 다시 뽑아도 같은 화풍)
   return enqueueImageJob(`G${groupNum} 이미지 재생성`, async () => {
     if (!S.parsed) throw new Error('대본을 먼저 여세요.');
@@ -10195,7 +9642,7 @@ ipcMain.handle('regen-group', (_e, args = {}) => {
       //   버리는 건 맨 끝 부정 절이라 그림 손실이 사실상 없다(cfg=1 + 네거티브 zero-out — v0.2.83).
       g._regenN = (g._regenN || 0) + 1;
       const _lv = ((g._regenN - 1) % 2) + 1;
-      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum], _lv, true); // Flow+Genspark 순환, 이 그룹만 (force = 영상이 있어도 이미지를 다시 만든다)
+      await runRotatingImages(pr, mediaDir, log, styleId, engine, [groupNum], _lv, true); // 이 그룹만 (force = 영상이 있어도 이미지를 다시 만든다)
       cacheGeneratedImages(pr, styleId, engine); // 새 결과 캐시 갱신(엔진 태그 맞춤)
       if (g.imagePath && g.imageStatus === 'done') log(`✓ G${groupNum} 재생성 완료`);
       else {

@@ -103,7 +103,7 @@ console.log('\n[3] 모든 이미지 입구가 대본 화풍을 거친다(소스 
   const APP = read('renderer/src/App.jsx');
   ok(/data-testid="style-src"/.test(APP) && /🎨 대본: \{hit\.name\}/.test(APP) && /value=\{SCRIPT_STYLE_ID\}[\s\S]{0,160}📜 대본스타일<\/option>/.test(APP), '화면: ② 이미지 스타일 목록에 「📜 대본스타일」 · 고른 때만 출처 표시');
   ok(/data-testid="style-pick"/.test(APP) && (APP.match(/await runStyleId\(\)/g) || []).length >= 7 && /qFb\.styleFallback = fb/.test(APP) && /batchFb\.styleFallback = fb/.test(APP) && !/(qStyle|batchStyle) = await runStyleId/.test(APP), '대본스타일 + 대본에 🎨 없음 → 만들기 전에 스타일 선택 팝업(이미지·영상·🔄·큐·만들기·배치) · 취소하면 시작하지 않는다');
-  ok(!/<option value="grok(-api)?">/.test(APP), '③ 비디오 목록(헤더·채널 편집)에 Grok 구독·API 항목이 없다');
+  ok(!Object.keys(require('../core/engine-migrate').VID_TO_NONE).some((v) => APP.includes('<option value="' + v + '">')), '③ 비디오 목록(헤더·채널 편집)에 지운 옛 영상 도구 항목이 없다');
   ok(/### 7\.1 화풍 — `> 🎨 화풍:/.test(read('docs/대본-작성-가이드.md')), '대본-작성-가이드.md 에 규격');
 }
 

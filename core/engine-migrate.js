@@ -3,6 +3,8 @@
 //   옛 이미지·비디오 도구 값을 AI 이미지·AI 영상으로 바꾸는 **한 곳**. 채널 저장소(preset-store) · 헤더(App.jsx) · 제작 입구(main)가 모두 이것을 부른다.
 //   ⚠ 순수 계산만 — 렌더러 번들에도 들어간다(CJS 런타임 참조 금지).
 //   바꾸는 값: ComfyUI(`comfy` · `comfy::<경로>`) · Genspark(`genspark` · 옛 순환 `rotate`) · 이미지 빈 값(옛 기본 = ComfyUI).
+//   🗑 Genspark·Grok 엔진 코드는 v1.0.49 에 저장소에서 지웠다 — 옛 값을 바꾸는 규칙만 여기 남는다(옛 큐·작업본·채널 파일이 그 값을 들고 올 수 있다).
+//   비디오 Grok(`grok`·`grok10`·`grok-api`)·Wan(`wan`) → 「없음」(v0.7.38 에 목록에서 뺄 때 정한 규칙 · ⛔ 유료 영상으로 바꾸지 않는다).
 //   그대로 두는 값: AI(`kie:…`) · 「없음」 · 나노바나나(`gemini`·`gemini-batch`) · 그 밖의 옛 값(각자 기존 처리 — Flow 는 「삭제됐다」 로그).
 //   바꿀 모델 = 지금 쓰던 것과 같은 계열(이미지 Qwen-Image 2.1 · 비디오 MiniMax H3) — ⛔ id 를 바꾸면 core/kie-models 표와 어긋난다.
 
@@ -19,6 +21,8 @@ function retiredName(v) {
   if (v === 'genspark' || v === 'rotate') return 'Genspark';
   return '';
 }
+// 비디오에서만 — 「없음」으로 읽는 옛 값
+const VID_TO_NONE = { grok: 'Grok', grok10: 'Grok', 'grok-api': 'Grok API', wan: 'Wan' };
 // → { v: 쓸 값, from: 바꾼 옛 도구 이름('' = 그대로) }
 function migrateImage(v) {
   const s = v == null ? '' : String(v);
@@ -28,6 +32,7 @@ function migrateImage(v) {
 }
 function migrateVideo(v) {
   const s = v == null ? '' : String(v);
+  if (Object.prototype.hasOwnProperty.call(VID_TO_NONE, s)) return { v: 'none', from: VID_TO_NONE[s] };
   const n = retiredName(s);
   return n ? { v: VID_DEFAULT, from: n } : { v: s, from: '' };
 }
@@ -45,6 +50,10 @@ function migratePreset(p) {
   }
   return out;
 }
-const toLabel = (v) => (v === IMG_DEFAULT ? 'AI 이미지 · Qwen-Image 2.1' : v === VID_DEFAULT ? 'AI 영상 · MiniMax H3' : v === LOCAL_QWEN ? '🖥 로컬 Qwen-Image 2.1' : v);
+const toLabel = (v) => (v === IMG_DEFAULT ? 'AI 이미지 · Qwen-Image 2.1' : v === VID_DEFAULT ? 'AI 영상 · MiniMax H3' : v === LOCAL_QWEN ? '🖥 로컬 Qwen-Image 2.1' : v === 'none' ? '없음(이미지만)' : v);
+// 옛 도구 이름표(화면 「(옛 설정) …」 · 로그) — 이름은 이 파일 한 곳에만 둔다
+const LEGACY_LABEL = { genspark: 'Genspark (구독)', rotate: 'Genspark (구독)', grok: 'Grok', grok10: 'Grok 10초', 'grok-api': 'Grok API', wan: 'Wan' };
+// 로그 꼬리 — 「옛 도구는 더 쓰지 않습니다」
+const RETIRED_NOTE = 'ComfyUI·Genspark·Grok 는 더 쓰지 않습니다';
 
-module.exports = { IMG_DEFAULT, VID_DEFAULT, LOCAL_QWEN, isLocalQwen, isComfy, retiredName, migrateImage, migrateVideo, migratePreset, toLabel };
+module.exports = { IMG_DEFAULT, VID_DEFAULT, LOCAL_QWEN, VID_TO_NONE, LEGACY_LABEL, RETIRED_NOTE, isLocalQwen, isComfy, retiredName, migrateImage, migrateVideo, migratePreset, toLabel };

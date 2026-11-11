@@ -26,10 +26,27 @@ ok('이미지: ComfyUI·Genspark·빈 값만 바꾸고 AI·나노바나나·Flow
 for (const v of ['comfy', 'comfy::C:/wf/video_minimax_h3_ref2v_cloud.json', 'genspark']) {
   const m = EM.migrateVideo(v); assert.equal(m.v, EM.VID_DEFAULT, v); assert.ok(m.from);
 }
-for (const v of ['none', '', 'kie:kling-3', 'grok', 'flow']) {
+for (const v of ['none', '', 'kie:kling-3', 'flow']) {
   const m = EM.migrateVideo(v); assert.equal(m.v, v); assert.equal(m.from, '');
 }
-ok('비디오: ComfyUI·Genspark 만 바꾸고 없음·빈 값·AI 는 그대로');
+ok('비디오: ComfyUI·Genspark 만 AI 영상으로 바꾸고 없음·빈 값·AI 는 그대로');
+// [3b] 지운 Grok·Wan 영상 값(v1.0.49 엔진 코드 삭제) → 「없음」 — ⛔ 유료 AI 영상으로 바꾸지 않는다
+for (const v of ['grok', 'grok10', 'grok-api', 'wan']) {
+  const m = EM.migrateVideo(v); assert.equal(m.v, 'none', v); assert.ok(m.from, v);
+  assert.equal(EM.migrateImage(v).v, v, '이미지 쪽은 건드리지 않는다: ' + v);
+}
+{ const p = { videoEngine: 'grok-api' }; const ch = EM.migratePreset(p); assert.equal(p.videoEngine, 'none'); assert.equal(ch.length, 1); }
+ok('비디오: 지운 Grok·Wan 값은 「없음」(채널 파일도 바꿔 저장)');
+// [3c] 지운 엔진의 이름은 engine-migrate 한 곳에만 — 코드(main·core·화면·preload)에 다시 나타나지 않는다
+{
+  const files = cp.execFileSync('git', ['ls-files', '*.js', '*.jsx'], { cwd: ROOT, encoding: 'utf8' }).split('\n')
+    .filter((f) => f && !/^(renderer\/dist|test|docs)\//.test(f) && f !== 'core/engine-migrate.js' && f !== 'core/kie-models.js');
+  const hits = [];
+  for (const f of files) { let s = ''; try { s = fs.readFileSync(path.join(ROOT, f), 'utf8'); } catch (_) { continue; } if (/genspark|grok/i.test(s)) hits.push(f); }
+  assert.deepEqual(hits, [], '지운 엔진 이름이 남은 파일: ' + hits.join(', '));
+  for (const f of ['genspark-engine.js', 'grok-engine.js', 'core/grok-api.js', 'core/image-rotation.js', 'core/account-creds.js']) assert.ok(!fs.existsSync(path.join(ROOT, f)), '지운 파일이 되살아났다: ' + f);
+}
+ok('지운 엔진 이름이 engine-migrate(+ kie 모델 표의 「Grok Imagine」 모델) 밖 코드에 없다');
 
 // [4] 채널 저장소 — 임시 홈에서 옛 값이 든 채널 파일을 읽으면 바꿔 저장하고, 두 번째 읽기엔 바꿀 것이 없다
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'engmig-'));
@@ -79,4 +96,4 @@ ok('main·화면 입구가 core/engine-migrate 를 거친다');
 }
 ok('👑 로컬 Qwen-Image 2.1 = 관리자 전용 · 이전 규칙 예외 · 이 PC GPU 레인');
 
-console.log(`\n${n}/6 통과`);
+console.log(`\n${n}/8 통과`);
