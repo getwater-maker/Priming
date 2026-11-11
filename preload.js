@@ -263,6 +263,8 @@ contextBridge.exposeInMainWorld('api', {
   bookExportBarcode: () => ipcRenderer.invoke('book-export-barcode'),
   bookSaveAsset: (args) => ipcRenderer.invoke('book-save-asset', args),
   bookBuildEpub: (args) => ipcRenderer.invoke('book-build-epub', args),
+  bookBuildKmong: (args) => ipcRenderer.invoke('book-build-kmong', args),   // 🛒 크몽판 PDF + 점검
+  bookKmongCheck: () => ipcRenderer.invoke('book-kmong-check'),
   bookEbookPreview: (args) => ipcRenderer.invoke('book-ebook-preview', args),
   bookEbookDoc: (args) => ipcRenderer.invoke('book-ebook-doc', args),
   bookOutputs: () => ipcRenderer.invoke('book-outputs'),

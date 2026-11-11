@@ -244,7 +244,9 @@ function halfTitleHtml(meta, fallbackTitle) {
   return `<section class="halftitle"><div class="ht-title">${inner}</div></section>`;
 }
 function titlePageHtml(meta, ctx, fallbackTitle) {
-  const logo = meta.logo ? `<img class="tp-logo" src="${esc(ctx.resolveImage(meta.logo))}" alt="logo" />` : '';
+  // 🛒 크몽판 — 속표지에도 펴낸곳(부크크일 수 있다) 이름·로고를 싣지 않는다(로이 2026-11-11 · 판권 규칙과 같은 까닭)
+  if (ctx && ctx.edition === 'kmong') meta = { ...meta, publisher: '', logo: '' };
+  const logo = meta.logo ?`<img class="tp-logo" src="${esc(ctx.resolveImage(meta.logo))}" alt="logo" />` : '';
   return `<section class="titlepage">
   <div class="tp-main">
     <h1 class="tp-title">${(() => { const ls = require('./title-lines').titleLines(meta, fallbackTitle); return ls.length > 1 ? ls.map((l, i) => `<span class="tp-t${i + 1}">${esc(l)}</span>`).join(' ') : esc(ls[0] || ''); })()}</h1>
@@ -258,6 +260,76 @@ function titlePageHtml(meta, ctx, fallbackTitle) {
 const DK = require('./date-ko');
 const BL = require('./book-lang');   // 책 언어(ko·en) — 영어 조판 문구·날짜·플랫폼×언어(해외 플랫폼 R23)
 const DEFAULT_LEGAL = '이 책의 내용 중 전부 또는 일부를 재사용하려면 반드시 저작권자의 서면 동의를 얻어야 합니다.';
+// ── 🛒 크몽판(edition 'kmong' · 2026-11-11) ──────────────────────────────────────────────
+//   규격 값은 platform-presets.PLATFORMS.kmong 한 곳 · 점검은 core/book/kmong-check.
+//   🔴 판권 = 허용 목록만: 제목·부제 · 지은이 · 옮긴이 · 해설 · 크몽판 만든 날 · 저작권 안내(ⓒ·재사용 문구).
+//     ⛔ ISBN·부가기호·전자책 ISBN · 부크크 발행일(issueDate·ebookIssueDate) · 펴낸곳·펴낸이·로고·연락처 · 정가·전자책 가격 · 출판등록번호 · QR 은 싣지 않는다.
+const KMONG_NOTICE_TITLE = '저작권 안내';
+const KMONG_DATE_LABEL = '크몽판';
+// 기본 안내 문안 — 크몽 posts/756 이 요구하는 내용(저작권법 제30·136조 · 민법 제750조)을 담은 우리 문안(크몽 예시 원문은 로그인 없이 열리지 않아 옮기지 못했다 · 원고 `> 크몽안내:` 가 이긴다)
+const KMONG_NOTICE_DEFAULT = [
+  '이 전자책은 저작권법의 보호를 받는 저작물이며, 구매하신 분 본인만 읽을 수 있습니다.',
+  '저작권법 제30조(사적 이용을 위한 복제)의 범위를 넘어, 저작권자의 서면 동의 없이 이 전자책의 전부 또는 일부를 복제·전송·배포·공유·재판매하거나 2차적 저작물로 만드는 것을 금지합니다.',
+  '이를 어기면 저작권법 제136조에 따라 5년 이하의 징역 또는 5천만 원 이하의 벌금에 처해질 수 있으며, 민법 제750조에 따라 손해배상 책임을 질 수 있습니다.',
+];
+function kmongDateOf(d) {
+  const s = String(d || '').trim();
+  if (/^(19|20)\d{2}\D\d{1,2}\D\d{1,2}/.test(s)) return s;
+  // 오늘(KST) — UTC 를 쓰지 않는다
+  const k = new Date(Date.now() + 9 * 3600 * 1000);
+  return `${k.getUTCFullYear()}-${String(k.getUTCMonth() + 1).padStart(2, '0')}-${String(k.getUTCDate()).padStart(2, '0')}`;
+}
+/** 크몽판 판권 메타 — 원고 메타에서 **허용한 칸만** 옮긴다(새 메타 칸이 생겨도 크몽판으로 새지 않게 허용 목록 방식). */
+function kmongColophonMeta(meta0, kmongDate) {
+  const m = meta0 || {};
+  const extra = (m.extra && typeof m.extra === 'object') ? m.extra : {};
+  const hae = extra['해설'] || extra['해설자'] || '';
+  return {
+    title: m.title || '', subtitle: m.subtitle || '',
+    author: m.author || '', translator: m.translator || '', translatorLabel: m.translatorLabel || '',
+    issueDate: `${KMONG_DATE_LABEL} ${kmongDateOf(kmongDate)}`,
+    extra: hae ? { '해설': hae } : {},
+    copyright: m.copyright || '', legalText: m.legalText || '',
+  };
+}
+function kmongOwnerName(meta) { return (meta && (meta.translator || meta.author || meta.title)) || ''; }
+/** 저작권 안내 쪽(표지 다음 · 맨 끝) — 문안 = 원고 `> 크몽안내:`(` | ` 로 문단 나눔) 또는 기본 문안 */
+function kmongNoticeHtml(meta, pos) {
+  const custom = String((meta && meta.kmongNotice) || '').trim();
+  const paras = custom ? custom.split(/\s*\|\s*/).filter(Boolean) : KMONG_NOTICE_DEFAULT;
+  const owner = kmongOwnerName(meta);
+  return `<section class="kmong-notice kmong-notice-${pos}">
+  <h2 class="kn-title">${esc(KMONG_NOTICE_TITLE)}</h2>
+  ${paras.map((p) => `<p class="kn-p">${esc(p)}</p>`).join('\n  ')}
+  ${owner ? `<p class="kn-owner">ⓒ ${esc(owner)}</p>` : ''}
+</section>`;
+}
+/** 쪽마다 옅은 워터마크 문구 — 원고 `> 크몽워터마크:` 또는 「ⓒ 저작권자 · 무단 복제·배포 금지」 */
+function kmongWatermarkText(meta) {
+  const c = String((meta && meta.kmongWatermark) || '').trim();
+  if (c) return c;
+  const owner = kmongOwnerName(meta);
+  return `${owner ? 'ⓒ ' + owner + ' · ' : ''}무단 복제·배포 금지`;
+}
+// 워터마크 = 아래 여백 가운데 칸(@bottom-center) — 판면(본문 글상자) 밖이라 본문 글자를 가리지 않는다.
+//   🔴 @page 특이도 함정(위 display 주석) — 이름+의사클래스마다 같은 칸을 다시 적어야 앞부속·백면·안내 쪽에도 찍힌다(뒤에 실려 같은 특이도에서 이긴다).
+function kmongCss(o) {
+  const t = String(o.kmongWatermark || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const wm = `@bottom-center { content: "${t}"; font-family: ${GOTHIC_STACK}; font-size: 7pt; color: #c4c4c4; vertical-align: bottom; padding-bottom: 8mm; }`;
+  const sels = [':left', ':right', ':blank', 'main:left', 'main:right', 'main:blank', 'main:blank:left', 'main:blank:right',
+    'display', 'display:left', 'display:right', 'front', 'front:left', 'front:right'];
+  return `
+/* ── 🛒 크몽판 ── */
+${sels.map((s) => `@page ${s} { ${wm} }`).join('\n')}
+section.ebook-cover img { object-fit: contain; }   /* A4 쪽에 판형이 다른 표지 — 자르지 않는다(제목 글자 보존) */
+section.kmong-notice { page: display; break-before: page !important; break-after: page; text-align: left; padding-top: 30mm; }
+section.kmong-notice .kn-title { font-family: ${GOTHIC_STACK}; font-size: 15pt; font-weight: 700; text-align: center; margin: 0 0 14mm; }
+section.kmong-notice p { text-indent: 0; margin: 0 0 5mm; }
+section.kmong-notice .kn-owner { text-align: right; margin-top: 10mm; }
+section.colophon.cp-kmong { break-before: page !important; }
+`;
+}
+
 // 판권 자동 생성 항목 정의 — UI 체크박스와 1:1 (key, 라벨, 값 추출)
 const COLOPHON_FIELDS = [
   ['issueDate', '발행일'], ['author', '지은이'], ['translator', '옮긴이'], ['issuer', '펴낸이'],
@@ -361,9 +433,13 @@ function colophonNotesHtml(fsec, book, ctx, srcAttr) {
 //   Option 1(2026-07-13): 자유문이 표·제목·ⓒ를 되풀이하면 그 줄만 빼고 고지문만 남김(중복 제거·무손실).
 function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   // 📱 전자책 판 — ISBN 은 전자책 ISBN(있으면) · 종이책 정가(POD)는 싣지 않는다
-  const meta = (ctx && ctx.edition === 'ebook')
-    ? { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '', issueDate: meta0.ebookIssueDate || meta0.issueDate }
-    : meta0;
+  // 🛒 크몽판 — 🔴 부크크 판권 정보를 하나도 물려받지 않는다(로이 2026-11-11): 허용 목록(kmongColophonMeta)만 싣고, [판권] 자유문(고지문)도 싣지 않는다
+  const kmong = !!(ctx && ctx.edition === 'kmong');
+  const meta = kmong ? kmongColophonMeta(meta0, ctx.kmongDate)
+    : (ctx && ctx.edition === 'ebook')
+      ? { ...meta0, isbn: meta0.ebookIsbn || meta0.isbn, isbnAddon: meta0.ebookIsbn ? '' : meta0.isbnAddon, price: '', issueDate: meta0.ebookIssueDate || meta0.issueDate }
+      : meta0;
+  if (kmong) { section = null; fields = null; }
   const only = (Array.isArray(fields) && fields.length) ? new Set(fields) : null;
   const on = (key) => !only || only.has(key);
   const cpLang = (ctx && ctx.lang) || 'ko';
@@ -437,7 +513,7 @@ function colophonHtml(meta0, ctx, isFront, section, book, srcAttr, fields) {
   //     여기서 비우면 **본문 러닝헤드가 통째로 사라진다** → isFront 면 넣지 않는다.
   const rhClear = isFront ? '' : '<span class="cp-rhclear"></span>';
 
-  return `<section class="colophon${isFront ? ' cp-front' : ''}">
+  return `<section class="colophon${isFront ? ' cp-front' : ''}${kmong ? ' cp-kmong' : ''}">
   ${rhClear}<div class="cp-wrap">
     <div class="cp-title">${esc(meta.title || '')}${meta.subtitle ? ` <span class="cp-subtitle">${esc(meta.subtitle)}</span>` : ''}</div>
     ${jw ? '' : dateBlock}
@@ -656,7 +732,7 @@ nav.toc a::after {
 ${o.colophonAlign === 'bottom'
     ? 'section.colophon { height: var(--content-h); display: flex; flex-direction: column; justify-content: flex-end; } section.colophon .cp-wrap { margin-top: 0; }'
     : 'section.colophon .cp-wrap { margin-top: 0; }'}
-${o.edition === 'ebook' ? ebookCss(o) : ''}`;
+${o.edition !== 'print' ? ebookCss(o) : ''}${o.edition === 'kmong' ? kmongCss(o) : ''}`;
 }
 
 // 📱 전자책 PDF — 화면으로 읽는다: 홀수쪽 맞추기(recto)가 만드는 백면을 없애고 쪽을 그냥 잇는다.
@@ -774,7 +850,7 @@ function resolveBookOptions(book, opts = {}) {
     scriptHideShots: !!opts.scriptHideShots,   // 샷 제목(### 샷N)까지 숨겨 줄글로 읽기
     sourceMap: opts.sourceMap !== false,
     // ── 📕 종이책(print) / 📱 전자책(ebook) — 전자책은 앞표지가 1쪽 · 백면 없이 이어서 · 좌우 같은 여백 · 링크 살림 ──
-    edition: opts.edition === 'ebook' ? 'ebook' : 'print',
+    edition: opts.edition === 'ebook' ? 'ebook' : opts.edition === 'kmong' ? 'kmong' : 'print',
     // 📐 R18 줄바꿈 — 어절(기본 · keep-all) / 글자(normal) / 절충(어절 + 벌어질 줄만 글자 단위). 원고 메타 `> 줄바꿈:` 이 이긴다
     lang: BL.langOf(meta),   // 책 언어 — 영어 원고는 한국어 전용 설정(어절 줄바꿈·keep-all·한자 보강)이 꺼진다
     lineBreak: BL.langOf(meta) === 'en' ? 'word' : (LB.modeOf(meta.lineBreak) || LB.modeOf(opts.lineBreak) || 'word'),
@@ -784,10 +860,24 @@ function resolveBookOptions(book, opts = {}) {
     o.marginsMm = { ...m, inner: side, outer: side };   // 제본이 없다 — 안쪽 여백을 따로 둘 까닭이 없다
     o.chapterStart = 'page';
   }
+  // 🛒 크몽판 — 판형·글자·행간·여백은 크몽 규격(PLATFORMS.kmong 한 곳)이 정한다. 조판 설정·원고 메타보다 규격이 이긴다(규격을 어기면 등록이 막힌다)
+  let trimIdOut = trimId, trimOut = trim;
+  if (o.edition === 'kmong') {
+    const K = getPlatform('kmong');
+    trimIdOut = K.defaultTrim; trimOut = getTrim(trimIdOut);
+    o.trimW = trimOut.width; o.trimH = trimOut.height;
+    o.fontSizePt = K.fontPt; o.lineHeight = K.lineHeight;
+    o.marginsMm = { ...K.marginsMm };
+    o.chapterStart = 'page';
+    o.pageNum = 'outer';   // 가운데 아래 칸은 워터마크 자리
+    o.headerGapMm = headerGapOf(meta.headerGap, opts.headerGapMm, o.marginsMm.top);
+    o.pageNumSafeMm = pageNumSafeOf(meta.pageNumSafe, opts.pageNumSafeMm, o.marginsMm.bottom);
+    o.kmongWatermark = kmongWatermarkText(meta);
+  }
   o.fontStack = FONT_STACKS[o.fontKey];
   o.hasSubtitle = !!(meta.subtitle && String(meta.subtitle).trim()); // 헤더 '제목 / 부제' 병기용
 
-  return { meta, platform, trimId, trim, o };
+  return { meta, platform, trimId: trimIdOut, trim: trimOut, o };
 }
 /** 영어 원고 조판 보정 — 한국어 기본 CSS(keep-all)를 되돌리고 하이픈을 켠다(`<html lang="en">` 가 있어야 하이픈 사전이 쓰인다) */
 function englishCss() {
@@ -815,9 +905,10 @@ function buildBookHtml(book, opts = {}) {
     scriptHideShots: o.scriptHideShots,
     hidePaths: o.hidePaths,   // 작업용 파일 경로 → 파일명만
     edition: o.edition,
+    kmongDate: opts.kmongDate || '',   // 🛒 크몽판 판권의 「크몽판」 날짜(비우면 오늘 KST)
     lang: o.lang,   // 책 언어(ko·en) — 영어 원고는 영어 문구·하이픈·`lang=en`
     lb: LB.contextFor(o, BOOK_FONT_DIR),   // 줄바꿈 계산 문맥(어절이면 null)
-    keepLinks: o.edition === 'ebook',
+    keepLinks: o.edition === 'ebook' || o.edition === 'kmong',
     endnotes: [],
     resolveImage(src) {
       if (/^(https?|data|media|file):/i.test(src)) return src;
@@ -836,15 +927,24 @@ function buildBookHtml(book, opts = {}) {
   if (o.edition === 'ebook' && opts.ebookCoverPath) {
     bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.ebookCoverPath))}" alt="${esc(BL.str(o.lang, 'coverAlt'))}" /></section>`);
   }
+  // 🛒 크몽판 — 1쪽 표지(그림 · 전자책 앞표지와 같은 출처) → 2쪽 저작권 안내
+  const kmong = o.edition === 'kmong';
+  if (kmong) {
+    if (opts.kmongCoverPath) bodyParts.push(`<section class="ebook-cover"><img src="${esc(imageUrl(opts.kmongCoverPath))}" alt="${esc(BL.str(o.lang, 'coverAlt'))}" /></section>`);
+    bodyParts.push(kmongNoticeHtml(meta, 'front'));
+  }
 
   // 앞부속 — 반표제지(기본 on) → 속표지 → (앞판권) → 예약섹션들(목차는 자동 생성)
   if (truthyDefault(meta.halfTitle, true)) bodyParts.push(halfTitleHtml(meta, book.fileTitle));
   bodyParts.push(titlePageHtml(meta, ctx, book.fileTitle));
-  const colFront = /앞/.test(String(meta.colophonPos || ''));
+  const colFront = !kmong && /앞/.test(String(meta.colophonPos || ''));   // 크몽판 판권은 늘 뒤(맨 끝 안내 쪽 바로 앞)
   const colSection = book.back.find((s) => s.key === 'colophon');
   const colIncluded = colSection && !o.excluded.includes('colophon');
   if (colFront && colIncluded) bodyParts.push(colophonHtml(meta, ctx, true, colSection, book, srcAttr, o.colophonFields));
+  // 크몽은 목차(쪽 번호)가 필수 — 구조 패널에서 목차를 빼도 크몽판에는 넣는다
+  const tocOff = !kmong && o.excluded.includes('toc');
   for (const s of book.front) {
+    if (s.key === 'toc' && !tocOff) { bodyParts.push(tocHtml(book, s.title, o.excluded, tocUsesFull(book))); continue; }
     if (o.excluded.includes(s.key)) continue; // 구조 패널에서 체크 해제(원고는 보존)
     if (s.key === 'toc') { bodyParts.push(tocHtml(book, s.title, o.excluded, tocUsesFull(book))); continue; }
     bodyParts.push(`<section class="front-section sec-${s.key}" id="sec-${s.key}">
@@ -855,7 +955,7 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
 
   // 목차 자동 생성 — 원고에 [목차] 섹션이 없으면 프로그램이 만들어 제공(원고에 있으면 그 위치가 우선).
   //   구조 패널에서 '목차' 체크 해제(excluded)하면 자동 생성도 생략.
-  if (!book.front.some((s) => s.key === 'toc') && !o.excluded.includes('toc')) {
+  if (!book.front.some((s) => s.key === 'toc') && !tocOff) {
     bodyParts.push(tocHtml(book, BL.str(o.lang, 'contents'), o.excluded, tocUsesFull(book)));
   }
 
@@ -896,7 +996,11 @@ ${blocksHtml(s.blocks, book, ctx, srcAttr)}
     }
   }
   if (o.footnoteMode === 'endnote' && ctx.endnotes.length && !ctx._endnotesDone) bodyParts.push(endnotesHtml(ctx));
-  if (colIncluded && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr, o.colophonFields));
+  if (kmong) {
+    // 🛒 크몽판 — 판권(허용 목록만 · 원고에 [판권] 이 없어도) → 맨 끝 쪽 저작권 안내
+    bodyParts.push(colophonHtml(meta, ctx, false, null, book, srcAttr, null));
+    bodyParts.push(kmongNoticeHtml(meta, 'back'));
+  } else if (colIncluded && !colFront) bodyParts.push(colophonHtml(meta, ctx, false, colSection, book, srcAttr, o.colophonFields));
 
   // ⚠ CSS 변수(:root + var()) 를 쓰지 않고 값을 직접 치환 — vivliostyle core(브라우저 미리보기)가
   //   var() 를 CLI 와 다르게 해석해 본문 크기가 16px 로 폴백 → 쪽수가 ~2.5배로 뻥튀기되던 문제.
@@ -942,6 +1046,7 @@ function metaPlatformId(meta) {
 }
 
 module.exports = { DEFAULT_LEGAL,
+  kmongColophonMeta, KMONG_NOTICE_TITLE, KMONG_NOTICE_DEFAULT, KMONG_DATE_LABEL, kmongWatermarkText,
   headerGapOf, pageNumSafeOf, HEADER_SAFE_MM,
   specialKeywordsOf, splitSpecialBlocks,
   chapterKey, chapterExcluded, shortenPath, LOCAL_PATH_RE, scriptFilter, buildBookHtml, resolveBookOptions, metaPlatformId, esc, inlineMd, FONT_OPTIONS, COLOPHON_FIELDS, FONT_STACKS, GOTHIC_STACK, filterColophonSection };

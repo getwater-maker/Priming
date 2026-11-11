@@ -506,6 +506,29 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
     setBuilding(false); refreshOutputs(); runEnd(own);
     return r;
   }
+  // 🛒 크몽판 PDF(2026-11-11) — A4·12pt·워터마크·저작권 안내 · 🔴 판권에 부크크 정보 없음 · 만든 뒤 점검(kmong-check) 결과를 카드에 보인다
+  const [kmongChk, setKmongChk] = useState(null);
+  async function buildKmong() {
+    if (cancelRef.current && runT0Ref.current) return;
+    const own = runBegin();
+    setBuilding(true); setBuildMsg('🛒 크몽판 PDF 생성 중 — A4 조판 + 점검'); setStatus('🛒 크몽판 PDF 생성 중…');
+    try {
+      const r = await api.bookBuildKmong({ layout });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.check) setKmongChk(r.check);
+      setStatus(r && r.cancelled ? '⏹ 만들기를 취소했습니다' : r && !r.error
+        ? (r.check && r.check.ok ? `🛒 크몽판 완료 — ${r.pages}쪽 · 점검 통과(본문 ${r.check.bodyPages}쪽)` : '⚠ 크몽판은 만들었지만 점검에서 막혔습니다 — 카드의 ❌ 항목 확인')
+        : '크몽판 실패 — 로그 확인');
+    } catch (e) { logline('크몽판 오류: ' + e.message); }
+    setBuilding(false); refreshOutputs(); runEnd(own);
+  }
+  async function recheckKmong() {
+    try {
+      const r = await api.bookKmongCheck();
+      if (!r || r.error) { setStatus('⚠ ' + ((r && r.error) || '크몽 점검 실패')); return; }
+      setKmongChk(r.check); setStatus(r.check.ok ? '✅ 크몽 점검 통과' : '⚠ 크몽 점검에서 막혔습니다 — 카드의 ❌ 항목 확인');
+    } catch (e) { logline('크몽 점검 오류: ' + e.message); }
+  }
   // 🤖 사이트 자동 입력 — 열린 크롬에서 로그인(직접) → 입력·파일 첨부까지 → 멈춤(저장·제출은 직접)
   async function runRegister(platform, only) {
     const eb = platform === 'ebook';   // 📘 부크크 새전자책(화면 탭 id 'ebook' → IPC 'bookk-ebook')
@@ -986,6 +1009,24 @@ body{overflow-y:scroll;display:flex;flex-direction:column}
           <b>EPUBCheck 메시지 {epubChk.messages.length}개</b>
           {epubChk.messages.slice(0, 8).map((m, i) => <div className="meta" key={i}>{m.severity} {m.where} — {m.message}</div>)}
           </div>
+          )}
+        </section>
+        <section className="bkcard" data-testid="bk-kmong">
+          <div className="bkcard-h" title="크몽 전자책 판매용 PDF — A4 · 글자 12pt · 줄 간격 1.5 · 1쪽 표지 · 처음/끝 저작권 안내(원고 &gt; 크몽안내:) · 쪽마다 옅은 워터마크(원고 &gt; 크몽워터마크:) · 판권에는 부크크 정보(ISBN·발행일·펴낸곳·정가)를 넣지 않습니다">🛒 크몽판<span className="grow" />
+            {kmongChk && <span className="meta" data-testid="bk-kmong-sum">{kmongChk.ok ? '✅ 점검 통과' : '❌ 막힘'} · 본문 {kmongChk.bodyPages}쪽</span>}
+          </div>
+          <div className="bkg2">
+            <button disabled={building || epubChkBusy} data-testid="bk-kmong-build" title="완성/크몽/01_완성본/[크몽] …_완성.pdf 를 만들고 바로 점검합니다 — 점검을 통과하고 이 PC 에 qpdf 가 있으면 편집 권한을 잠급니다(열기 암호 없음)" onClick={buildKmong}>{building ? '⏳ 생성 중…' : '🛒 크몽판 만들기'}</button>
+            <button className="ghost" disabled={building} data-testid="bk-kmong-check" title="이미 만든 크몽판 PDF 를 다시 점검합니다(만들지 않음) — 본문 20쪽 · 200MB · 부크크·ISBN 글자 0개 · 목차 쪽 번호 · 안내 쪽 · 워터마크 · 수정 제한" onClick={recheckKmong}>🔎 다시 점검</button>
+          </div>
+          {kmongChk && (
+            <div data-testid="bk-kmong-items">
+              {kmongChk.items.map((i) => (
+                <div key={i.id} className={i.status === 'fail' ? 'bkfit warn' : 'meta'} data-st={i.status} title={i.detail}>
+                  {({ ok: '✅', fail: '❌', warn: '⚠', manual: '✋' })[i.status] || '·'} {i.label}{i.status !== 'ok' ? ' — ' + i.detail : ''}
+                </div>
+              ))}
+            </div>
           )}
         </section>
         <div className="bkreg-2" data-testid="bk-auto" title="항상 종이책을 먼저 등록하세요 — 4단계에서 읽은 종이책 최종정가의 70%(10원 단위 버림)가 전자책 정가가 됩니다 · 로그인과 마지막 「도서제출」은 직접 누르세요">

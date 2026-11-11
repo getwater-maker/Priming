@@ -15,13 +15,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const PREFIX = { print: '[종이책] ', ebook: '[전자책] ' };
-const EDITION_DIR = { print: '종이책', ebook: '전자책' };
+// 🛒 크몽판(2026-11-11) — 완성/크몽/01_완성본/[크몽] <작품>_<권>_완성.pdf (메인 이미지·상세·미리보기 폴더는 다음 묶음)
+const PREFIX = { print: '[종이책] ', ebook: '[전자책] ', kmong: '[크몽] ' };
+const EDITION_DIR = { print: '종이책', ebook: '전자책', kmong: '크몽' };
 const SLOT_DIR = { full: '01_완성본', cover: '02_표지', body: '03_내지', interior: '03_내지', epub: '04_epub' };
 // kind → [새 꼬리, 옛 꼬리]
 const TAIL = {
   print: { full: ['_완성.pdf', '_표지+내지.pdf'], cover: ['_표지.pdf', '_표지.pdf'], interior: ['_내지.pdf', '_내지.pdf'] },
   ebook: { full: ['_완성.pdf', '_표지+본문.pdf'], cover: ['_표지.pdf', '_표지.pdf'], body: ['_본문.pdf', '_본문.pdf'], epub: ['_완성.epub', '.epub'] },
+  kmong: { full: ['_완성.pdf', '_완성.pdf'] },
 };
 
 function isLayout(outRoot) { return !!outRoot && path.basename(path.resolve(outRoot)) === '완성'; }
@@ -73,4 +75,19 @@ function removeLegacy(outRoot, edition, base, kinds) {
   return gone;
 }
 
-module.exports = { isLayout, outPath, findOwn, listAll, removeLegacy, PREFIX, EDITION_DIR, SLOT_DIR };
+/**
+ * 📄 완성 파일 종류 — 이름 앞 [종이책]/[전자책]/[크몽] + 뒤쪽으로 가른다(main bookOutputKind 가 이것을 부른다).
+ *   🔴 접두가 먼저다 — [전자책] _표지.pdf 를 종이책 표지로, [크몽] _완성.pdf 를 종이책·전자책 완성본으로 잡지 않게(v0.9.13 사고 계열).
+ *   옛 이름 _전자책.pdf·.epub 도 그대로 찾는다.
+ */
+function outputKind(f) {
+  f = String(f || '');
+  if (f.startsWith(PREFIX.kmong)) return f.endsWith('_완성.pdf') ? 'kmongPdf' : null;
+  if (/\.epub$/i.test(f)) return 'epub';
+  if (!/\.pdf$/i.test(f)) return null;
+  if (f.endsWith('_전자책.pdf')) return 'ebookPdf';
+  if (f.startsWith(PREFIX.ebook)) return (f.endsWith('_완성.pdf') || f.endsWith('_표지+본문.pdf')) ? 'ebookPdf' : f.endsWith('_본문.pdf') ? 'ebookBody' : f.endsWith('_표지.pdf') ? 'ebookCover' : null;
+  return (f.endsWith('_완성.pdf') || f.endsWith('_표지+내지.pdf')) ? 'full' : f.endsWith('_내지.pdf') ? 'interior' : f.endsWith('_표지.pdf') ? 'cover' : null;
+}
+
+module.exports = { isLayout, outPath, findOwn, listAll, removeLegacy, outputKind, PREFIX, EDITION_DIR, SLOT_DIR };

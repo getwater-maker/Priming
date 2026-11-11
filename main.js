@@ -12834,10 +12834,11 @@ async function buildEbookPdf(args, outRoot, t0) {
   return { dto: currentDTO(), pages: r.pages, edition: 'ebook', ebookPdf: fullPdf, ebookBodyPdf: bodyPdf, ebookCoverPdf: coverPdf, interiorPdf: null, coverPdf: null };
 }
 // 📱 전자책 앞표지 한 쪽 PDF(`[전자책] <권>_표지.pdf`) — 부크크 전자책 3단계 표지 · 표지+본문의 1쪽. 반환 = 경로 또는 null.
-async function buildEbookFrontCoverPdf(outRoot, base, workDir, args = {}) {
+//   outOverride = 다른 곳에 쓸 때(🛒 크몽판은 _작업 안 임시 파일 — 전자책 표지 파일을 건드리지 않는다)
+async function buildEbookFrontCoverPdf(outRoot, base, workDir, args = {}, outOverride = '') {
   const PK = require('./core/book/pdf-pack');
   const meta = S.parsed.meta || {};
-  const out = OL.outPath(outRoot, 'ebook', 'cover', base);
+  const out = outOverride || OL.outPath(outRoot, 'ebook', 'cover', base);
   const { spread } = bookSpec(meta, S.parsed._lastPages || 0);
   const trimW = (PK.frontPanelOf(spread) || {}).widthMm || 0;   // 앞표지 폭 = 판형 폭
   try {
@@ -12857,6 +12858,55 @@ async function buildEbookFrontCoverPdf(outRoot, base, workDir, args = {}) {
   } catch (e) { log('✗ 전자책 표지 PDF 실패: ' + e.message); }
   return null;
 }
+// 🛒 크몽판 PDF(2026-11-11 · 설계 docs/크몽-상세페이지-main분리-설계.md §A-3) — 만들기·점검 본체는 core/book/kmong-build·kmong-check 한 곳.
+//   A4·12pt·줄 간격 1.5 · 1쪽 표지 · 처음/끝 저작권 안내 · 쪽마다 워터마크 · 🔴 판권에 부크크 정보 없음(허용 목록) · 점검 통과 때만 편집 잠금(qpdf 있으면)
+function logKmongCheck(chk) {
+  if (!chk) return;
+  const ic = { ok: '✅', fail: '❌', warn: '⚠', manual: '✋' };
+  log(`🛒 크몽 점검 — ${chk.ok ? '통과' : '막힘(❌ 항목을 고친 뒤 다시 만드세요)'} · 본문 ${chk.bodyPages}쪽 / 전체 ${chk.totalPages}쪽`);
+  for (const i of chk.items) log(`   ${ic[i.status] || '·'} ${i.label} — ${i.detail}`);
+}
+regBook('book-build-kmong', async (_e, args = {}) => {
+  if (!S.parsed || S.parsed.kind !== 'book') { log('열린 출판 원고가 없습니다.'); return { dto: currentDTO() }; }
+  const t0 = Date.now();
+  bookCancelReset();
+  try {
+    const PB = require('./core/book/pdf-builder');
+    rememberBookLayout(args.layout);
+    const outRoot = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+    const base = bookFileBase();
+    const workDir = WF.tmpDir(outRoot, '_work_kmong', 'work_kmong');
+    try { fs.mkdirSync(workDir, { recursive: true }); } catch {}
+    // 표지 = 전자책 앞표지와 같은 출처(메타 전자책표지 > 표지 도구 전자책앞표지.jpg) — 없으면 종이책 표지 앞면(PDF → 그림)
+    let cover = await resolveEbookCoverFile(outRoot, base);
+    if (!cover) cover = (await buildEbookFrontCoverPdf(outRoot, base, workDir, args, path.join(workDir, '_kmong-front.pdf'))) || '';
+    if (!cover) log('ℹ 크몽판 표지가 없습니다 — 표지 없이 저작권 안내부터 만듭니다(`> 전자책표지:` 메타 또는 인쇄 표지를 첨부하세요)');
+    warnMissingFontFiles('크몽판 PDF');
+    const outPdf = OL.outPath(outRoot, 'kmong', 'full', base);
+    const r = await require('./core/book/kmong-build').buildKmongPdf({
+      book: S.parsed, layoutOpts: bookLayoutOpts(args), coverPath: cover, outPdf, workDir,
+      baseDir: S.scriptPath ? path.dirname(S.scriptPath) : undefined, log,
+    });
+    if (r.cancelled || PB.isCancelled()) return bookCancelledResult('크몽판 PDF');
+    if (!r.success) { log('✗ 크몽판 PDF 실패: ' + r.error); return { dto: currentDTO(), error: r.error }; }
+    log(`🛒 크몽판 PDF 완료 — ${r.pages}쪽(A4${r.hasCover ? ' · 1쪽 표지' : ''}) (${Math.round((Date.now() - t0) / 1000)}초) → ${path.basename(outPdf)}`);
+    logKmongCheck(r.check);
+    if (!args.noOpen) { try { shell.openPath(path.dirname(outPdf)); } catch {} }
+    return { dto: currentDTO(), kmongPdf: outPdf, pages: r.pages, check: r.check };
+  } catch (e) { log('✗ 크몽판 PDF 오류: ' + e.message); return { dto: currentDTO(), error: e.message }; }
+});
+// 🛒 이미 만든 크몽판을 다시 점검(만들지 않는다) — 표지 쪽은 1쪽이 글자 없는 쪽인지로 판단
+regBook('book-kmong-check', async () => {
+  if (!S.parsed || S.parsed.kind !== 'book') return { error: '열린 출판 원고가 없습니다.' };
+  const outRoot = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
+  const f = OL.findOwn(outRoot, 'kmong', 'full', bookFileBase());
+  if (!f) return { error: '크몽판 PDF 가 아직 없습니다 — 먼저 만드세요' };
+  try {
+    const chk = await require('./core/book/kmong-check').checkKmongPdf(f, { watermark: require('./core/book/html-builder').kmongWatermarkText(S.parsed.meta || {}) });
+    logKmongCheck(chk);
+    return { check: chk, kmongPdf: f };
+  } catch (e) { return { error: e.message }; }
+});
 async function buildSpreadCoverTmp(cvPlan, spread, outPdf, workDir) {
   const r = await require('./core/book/pdf-builder').buildCoverPdf({ imagePath: cvPlan.hasImg ? S.parsed.coverImagePath : null, spread, outPdf, workDir, log, compose: cvPlan.compose });
   return r && r.success;
@@ -13581,13 +13631,8 @@ ipcMain.handle('book-preflight', async (_e, args = {}) => {
   } catch (e) { log('출고 전 점검 오류: ' + e.message); return null; }
 });
 // 📄 완성 파일 종류 — 이름 앞 [종이책]/[전자책] + 뒤쪽으로 가른다(전자책 _표지.pdf 를 종이책 표지로 잡지 않게 · 옛 이름 _전자책.pdf·.epub 도 그대로 찾는다)
-function bookOutputKind(f) {
-  if (/\.epub$/i.test(f)) return 'epub';
-  if (!/\.pdf$/i.test(f)) return null;
-  if (f.endsWith('_전자책.pdf')) return 'ebookPdf';
-  if (f.startsWith(BOOK_PREFIX.ebook)) return (f.endsWith('_완성.pdf') || f.endsWith('_표지+본문.pdf')) ? 'ebookPdf' : f.endsWith('_본문.pdf') ? 'ebookBody' : f.endsWith('_표지.pdf') ? 'ebookCover' : null;
-  return (f.endsWith('_완성.pdf') || f.endsWith('_표지+내지.pdf')) ? 'full' : f.endsWith('_내지.pdf') ? 'interior' : f.endsWith('_표지.pdf') ? 'cover' : null;
-}
+//   판정 본체는 out-layout.outputKind 한 곳(🛒 [크몽] 파일을 종이책·전자책으로 잡지 않게 — 시험 book-kmong.smoke)
+function bookOutputKind(f) { return OL.outputKind(f); }
 function listBookOutputs() {
   const root = S.outRoot || bookOutRoot(S.scriptPath || 'book.md', S.preset);
   const out = [];

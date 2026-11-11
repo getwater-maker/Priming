@@ -86,6 +86,9 @@ const META_KEYS = {
   '정가': 'price', '가격': 'price', 'pod가격': 'price', 'pod 가격': 'price',
   '전자책': 'ebookPrice', '전자책가격': 'ebookPrice', '전자책 가격': 'ebookPrice',
   '전자책표지': 'ebookCover', '전자책 표지': 'ebookCover',
+  // 🛒 크몽판 PDF — 첫/마지막 쪽 저작권 안내 문안(` | ` = 문단 나눔 · 비우면 기본 문안) · 쪽마다 옅은 워터마크 문구(비우면 「ⓒ 저작권자 · 무단 복제·배포 금지」)
+  //   표준 키로 받아야 판권의 「그 밖의 줄」(extra)로 새지 않는다
+  '크몽안내': 'kmongNotice', '크몽 안내': 'kmongNotice', '크몽워터마크': 'kmongWatermark', '크몽 워터마크': 'kmongWatermark',
   // 인쇄 표지 파일(앞표지+책등+뒷표지 스프레드) — 원고 파일 기준 상대경로. 원고를 열면 자동 첨부(core/book/work-folder.js)
   // 부크크 등록 입력값 파일(원고 파일 기준 상대경로) — 없으면 <작품>/기준/등록/<원고이름>.등록정보.md 를 찾는다(core/book/register-info.js)
   '등록정보': 'registerInfo', '등록정보파일': 'registerInfo',

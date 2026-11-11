@@ -148,6 +148,30 @@ PLATFORMS.d2d = {
   note: 'D2D Print = 무선제본 흑백(그레이스케일) 내지만 · PDF · 판형 6종 · 32~1,050쪽 · 블리드 0.125″(제본쪽 제외) · 표지는 D2D 템플릿(책등 식 비공개) · 전자책은 EPUB(EPUBCheck 통과 필수·90MB) · 여백·글꼴 규정은 문서에 없음(KDP 표를 보수적 기준으로)',
 };
 
+// ── 🛒 크몽 전자책(판매처 — POD 아님 · 「크몽판 PDF」 edition 'kmong') ─────────────────────────────
+//   ⚠ 이 항목은 원고 메타 `> 플랫폼:` 으로 고르지 않는다(metaPlatformId 는 그대로) — 크몽판 조판·점검(kmong-check)만 읽는다.
+//   출처(확인일 2026-11-11 KST · 로그인 화면 실측 = docs/크몽-등록화면-실측_2026-11-11.md):
+//     ✅ 전자책 파일 TIP #20 「글자 크기 12pt, 줄 간격 1.5, A4사이즈 기본여백 … PDF 파일 형식으로만 … 표지 및 목차 제외 A4용지 20페이지 이상」
+//        — 등록 편집 화면 https://kmong.com/my-gigs/edit/… (가격 정보 탭) · 공개 문서 https://kmong.com/support/customer-center/posts/756
+//     ✅ 「이미지·여백 30% 이상이면 등록 불가」 — posts/756 (확인 2026-11-11)
+//     ✅ 파일당 200MB — 편집 화면 「최대 200mb」 · https://kmong.com/support/customer-center/posts/755 (확인 2026-11-11)
+//     ✅ 메인 이미지 652×488 — https://kmong.com/support/customer-center/posts/752 · 편집 화면 (확인 2026-11-11)
+//     ⚠ 「A4 기본 여백」 수치는 문서에 없다 — 우선 위·아래 20mm · 좌·우 25mm(판단 · 첫 등록 때 크몽 템플릿 https://shorturl.at/Bf42X 로 확인)
+PLATFORMS.kmong = {
+  label: '크몽 (전자책 판매)',
+  trims: ['A4'],
+  defaultTrim: 'A4',
+  fontPt: 12,                 // ✅ TIP #20
+  lineHeight: 1.5,            // ✅ TIP #20
+  marginsMm: { top: 20, bottom: 20, inner: 25, outer: 25 },   // ⚠ 판단 — 위 주석
+  minBodyPages: 20,           // ✅ 표지·목차 제외 A4 세로 20쪽 이상(가로 30쪽)
+  maxImageRatio: 0.3,         // ✅ 이미지·여백 30% 이상이면 등록 불가 → 30% 미만이어야 한다
+  maxBytes: 200 * 1024 * 1024,   // ✅ 파일당 200MB
+  mainImage: { w: 652, h: 488 },   // ✅ 메인 이미지(이번 판에서는 쓰지 않는다 — 설계 §A-3 ③)
+  fileTypes: ['pdf'],         // ✅ PDF 만(ePub 불가)
+  note: 'PDF 만 · 글자 12pt · 줄 간격 1.5 · A4 기본 여백(위·아래 20 · 좌·우 25mm 잠정) · 표지·목차 빼고 본문 20쪽 이상 · 이미지·여백 30% 미만 · 200MB 이하 · 워터마크 · 첫/마지막 쪽 저작권 안내',
+};
+
 function getPlatform(id) { return PLATFORMS[id] || PLATFORMS.bookk; }
 function getTrim(id) { return TRIM_SIZES[id] || TRIM_SIZES['A5']; }
 function getPaper(id) { return PAPERS[id] || PAPERS['백색모조 100g']; }

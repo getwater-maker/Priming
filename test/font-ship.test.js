@@ -26,7 +26,7 @@ for (const f of ['NotoSerifKR-Light.ttf', 'HanjaSerif-Light.ttf', 'NotoSerifKR-O
 ok(!Object.keys(mf).some((k) => /fonts\/book\/(KoPub|Nanum)/.test(k)), '매니페스트에 KoPub·나눔 없음');
 ok(bundledFontCss().includes('Priming Hanja Serif'), '@font-face 가 같은 표에서 나온다');
 const M = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-ok((M.match(/warnMissingFontFiles\('/g) || []).length === 2 && /동봉 글꼴 파일 없음/.test(M), 'main: 미리보기·내지 PDF 두 곳에서 경고');
+ok((M.match(/warnMissingFontFiles\('/g) || []).length === 3 && /warnMissingFontFiles\('크몽판 PDF'\)/.test(M) && /동봉 글꼴 파일 없음/.test(M), 'main: 미리보기·내지 PDF·크몽판 PDF 세 곳에서 경고');
 ok(/글꼴 확인 불완전/.test(M), 'main: 못 읽은 글꼴이 있으면 「누락 0」 대신 알림');
 console.log(`\n${fail ? '❌' : '✅'} font-ship — ${pass} 통과 / ${fail} 실패`);
 process.exit(fail ? 1 : 0);
