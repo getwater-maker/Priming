@@ -518,9 +518,10 @@ function Hint({ children }) {
     const me = ref.current; if (!me) return undefined;
     const tgt = hintTarget(me); if (!tgt) return undefined;
     const on = () => hintShow(tgt, me.innerHTML);
-    tgt.addEventListener('mouseenter', on); tgt.addEventListener('mouseleave', hintHide);
+    // 🖱 누르면(목록 펼치기·입력 시작) 설명을 닫는다 — 펼친 목록을 가리지 않게(v1.0.59 · 로이 「팝업이 가려지네」) · 다시 보려면 칸 밖으로 나갔다 들어온다
+    tgt.addEventListener('mouseenter', on); tgt.addEventListener('mouseleave', hintHide); tgt.addEventListener('mousedown', hintHide);
     tgt.setAttribute('data-has-hint', '1');
-    return () => { tgt.removeEventListener('mouseenter', on); tgt.removeEventListener('mouseleave', hintHide); tgt.removeAttribute('data-has-hint'); hintHide(); };
+    return () => { tgt.removeEventListener('mouseenter', on); tgt.removeEventListener('mouseleave', hintHide); tgt.removeEventListener('mousedown', hintHide); tgt.removeAttribute('data-has-hint'); hintHide(); };
   }, []);
   return <span ref={ref} className="hint-src" hidden>{children}</span>;
 }
@@ -8393,12 +8394,12 @@ export default function App() {
                           {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken || c.needsReconnect ? ' (⚠ 다시 연결)' : ''}</option>)}
                           {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
+                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 옆 칸에서 고른 공개 상태(기본 <b>일부 공개</b>)로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
                         <select data-testid="ch-yt-privacy" value={ch.ytPrivacy === 'private' ? 'private' : 'unlisted'} onChange={(e) => setCh({ ...ch, ytPrivacy: e.target.value })}>
                           <option value="unlisted">👁 일부 공개로 올리기</option>
                           <option value="private">🔒 비공개로 올리기</option>
                         </select>
                         <Hint>👁 <b>일부 공개</b>(기본)로 올리면 Studio 에서 바로 고정댓글을 달 수 있습니다 — 검색·구독 피드에는 나오지 않고 링크를 아는 사람만 봅니다. 🔒 <b>비공개</b>는 예전 방식입니다. <b>예약</b>을 켜면 구글 규칙상 언제나 비공개로 올라갑니다. 올린 뒤 실제 공개 상태를 다시 읽어 로그 확인표에 적습니다.</Hint>
-                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 위에서 고른 공개 상태(기본 <b>일부 공개</b>)로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
                         <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} data-testid="ch-yt-sched">
                           <button data-testid="ch-yt-sched-on" aria-pressed={!!(ch.ytSchedule && ch.ytSchedule.on)} className={'dl-tg' + (ch.ytSchedule && ch.ytSchedule.on ? ' on' : '')} onClick={() => setCh({ ...ch, ytSchedule: { time: '18:00', ...(ch.ytSchedule || {}), on: !(ch.ytSchedule && ch.ytSchedule.on) } })}>{ch.ytSchedule && ch.ytSchedule.on ? '✓ 예약' : '예약 끔'}</button>
                           <input data-testid="ch-yt-sched-time" type="time" style={{ flex: '0 0 92px' }} value={(ch.ytSchedule && ch.ytSchedule.time) || '18:00'} disabled={!(ch.ytSchedule && ch.ytSchedule.on)} onChange={(e) => setCh({ ...ch, ytSchedule: { ...(ch.ytSchedule || {}), time: e.target.value } })} /><span className="meta">KST</span>

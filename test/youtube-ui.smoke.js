@@ -68,6 +68,16 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const pvOpts = await pv.locator('option').evaluateAll((os) => os.map((o) => o.value));
     ok(await pv.count() === 1 && pvOpts.join() === 'unlisted,private', `👁 공개 상태 칸 = 일부 공개·비공개 (${pvOpts.join()})`);
     ok(['unlisted', 'private'].includes(await pv.inputValue()), `공개 상태 값이 둘 중 하나 (${await pv.inputValue()})`);
+    // 💡 설명 팝업 — 칸마다 자기 설명 · 누르면 닫힌다(v1.0.59 · 공개 상태 칸에 🎬 설명이 붙어 펼친 목록을 가린 것)
+    const hintTxt = async () => win.evaluate(() => { const h = document.getElementById('hint-float'); return h && h.style.display !== 'none' ? h.textContent : ''; });
+    await row.locator('select').first().hover(); await win.waitForTimeout(450);
+    ok(/^🎬/.test(await hintTxt()), '「올릴 채널」 칸에 마우스 → 🎬 업로드 설명');
+    await win.mouse.move(2, 2); await win.waitForTimeout(100);
+    await pv.hover(); await win.waitForTimeout(450);
+    ok(/^👁/.test(await hintTxt()), '공개 상태 칸에 마우스 → 👁 공개 상태 설명(🎬 이 아님)');
+    await pv.dispatchEvent('mousedown'); await win.waitForTimeout(100);
+    ok((await hintTxt()) === '', '칸을 누르면(목록 펼치기) 설명 팝업이 닫힌다');
+    await win.mouse.move(2, 2);
     const sel = row.locator('select').first();
     const firstOpt = await sel.locator('option').first().textContent();
     ok(st.channels.length ? /올릴 채널/.test(firstOpt) : /연결 없음/.test(firstOpt), `채널 목록 첫 줄: 「${firstOpt}」`);
