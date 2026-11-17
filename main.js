@@ -11640,33 +11640,99 @@ ipcMain.handle('clip-voice-overwrite', async (_e, args = {}) => {
   const s = sents[0];
   let src = args.path;
   if (!src) {
-    const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: '녹음 파일', extensions: ['wav', 'mp3', 'm4a', 'aac', 'flac', 'ogg', 'opus', 'wma', 'mp4', 'webm'] }] });
+    const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: '녹음 파일', extensions: require('./core/phone-recv').AUDIO_EXT.filter((x) => x !== 'qta') }] });
     if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true, dto: P.toDTO(S.parsed) };
     src = r.filePaths[0];
   }
-  if (!fs.existsSync(src)) return { ok: false, error: '파일을 찾을 수 없습니다', dto: P.toDTO(S.parsed) };
+  const r = await _ownVoiceFromFile(pr, s, src, { trim: args.trim, label: args.fromMic ? '마이크 녹음' : path.basename(src) });
+  if (args.fromMic && path.dirname(src) === path.join(require('os').tmpdir(), 'priming-rec')) { try { fs.rmSync(src, { force: true }); } catch {} }   // 임시 녹음은 tts-N 에 옮겼으니 지운다
+  return { ...r, dto: P.toDTO(S.parsed) };
+});
+// 🎙 내 녹음 파일 → 그 문장 음성(한 길 — 파일 고르기 · 🎤 마이크 · 📱 핸드폰 모두 여기를 거친다 · v1.0.53 에 핸들러에서 뽑음)
+//   24kHz 모노로 읽고 → ✂ 앞뒤 무음만 자른다(녹음 버튼을 누른 뒤·끄기 전의 빈 소리 · 사이 쉼은 그대로 · 판정은 quiet-trim 한 곳) → 새 WAV `<번호>_o<지문>.wav`
+//   o = { trim?(false = 자르지 않음), label(로그용) } → { ok, dur, trimmed } | { ok:false, error }
+async function _ownVoiceFromFile(pr, s, src, o = {}) {
+  if (!src || !fs.existsSync(src)) return { ok: false, error: '파일을 찾을 수 없습니다' };
   const ff = require('./core/media-utils').getFfmpegPath();
-  if (!ff || !fs.existsSync(ff)) return { ok: false, error: 'ffmpeg 를 쓸 수 없습니다', dto: P.toDTO(S.parsed) };
+  if (!ff || !fs.existsSync(ff)) return { ok: false, error: 'ffmpeg 를 쓸 수 없습니다' };
   const st = fs.statSync(src);
   const hash = require('crypto').createHash('sha1').update(src + '|' + st.size + '|' + Math.round(st.mtimeMs)).digest('hex').slice(0, 8);
   const dir = shortsDirs(S.outRoot, pr.shortsNum).tts;
   const out = path.join(dir, `${s.num}_o${hash}.wav`);
-  // 24kHz 모노로 읽고 → ✂ 앞뒤 무음만 자른다(녹음 버튼을 누른 뒤·끄기 전의 빈 소리 · 사이 쉼은 그대로 · 판정은 quiet-trim 한 곳) → WAV
   const QT = require('./core/quiet-trim');
   let pcm = await QT.decodePcm(src, ff);
-  if (!pcm || pcm.length < 24000 * 0.05) return { ok: false, error: pcm ? '소리가 거의 없는 파일입니다' : '이 파일을 소리로 읽지 못했습니다', dto: P.toDTO(S.parsed) };
+  if (!pcm || pcm.length < 24000 * 0.05) return { ok: false, error: pcm ? '소리가 거의 없는 파일입니다' : '이 파일을 소리로 읽지 못했습니다' };
   let trimmed = 0;
-  if (args.trim !== false) { const t = QT.trimEdges(pcm, 24000); if (t) { pcm = t.pcm; trimmed = t.removedSec; } }
+  if (o.trim !== false) { const t = QT.trimEdges(pcm, 24000); if (t) { pcm = t.pcm; trimmed = t.removedSec; } }
   const dur = pcm.length / 24000;
   try { fs.mkdirSync(dir, { recursive: true }); const tmp = out + '.tmp'; fs.writeFileSync(tmp, QT.wavOf(pcm, 24000)); fs.renameSync(tmp, out); }
-  catch (e) { return { ok: false, error: '녹음을 저장하지 못했습니다: ' + e.message, dto: P.toDTO(S.parsed) }; }
+  catch (e) { return { ok: false, error: '녹음을 저장하지 못했습니다: ' + e.message }; }
   undoPush('음성 덮어쓰기');
-  s.ttsAudioPath = out; s.ttsDurationSec = dur; s.voiceOwn = true; wipe(s);
-  log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${args.fromMic ? '마이크 녹음' : path.basename(src)} (${dur.toFixed(1)}초${trimmed > 0.05 ? ` · 앞뒤 무음 ${trimmed.toFixed(1)}초 자름` : ''})`);
-  if (args.fromMic && path.dirname(src) === path.join(require('os').tmpdir(), 'priming-rec')) { try { fs.rmSync(src, { force: true }); } catch {} }   // 임시 녹음은 tts-N 에 옮겼으니 지운다
+  s.ttsAudioPath = out; s.ttsDurationSec = dur; s.voiceOwn = true; delete s.quiet; delete s.wt;
+  log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${o.label || path.basename(src)} (${dur.toFixed(1)}초${trimmed > 0.05 ? ` · 앞뒤 무음 ${trimmed.toFixed(1)}초 자름` : ''})`);
   storeActive(); syncSnapshotNow();
-  return { ok: true, dur, trimmed, dto: P.toDTO(S.parsed) };
+  return { ok: true, dur, trimmed };
+}
+// 📱 핸드폰에서 받기(v1.0.53 · 로이 2026-11-17) — core/phone-recv 가 같은 Wi-Fi 에 작은 페이지를 열고(QR) 핸드폰이 녹음을 올린다.
+//   받은 파일은 _ownVoiceFromFile 한 길로 · 대상 = 문장 id(편집으로 번호가 밀려도 같은 문장) · 대본이 바뀌면 받지 않는다(다른 대본에 들어가지 않게)
+//   🧪 E2E(PM_UI_SMOKE)는 127.0.0.1 에만 연다(시험 때 Windows 방화벽 창이 뜨지 않게)
+let _phone = null;   // { srv, scriptPath, shortsNum, sentId, autoNext, done[] }
+function _phoneFlat(pr) { return pr.groups.flatMap((g) => pr.getSentencesOfGroup(g).map((s, i) => ({ s, groupNum: g.num, sentIdx: i }))); }
+function _phoneTarget() {   // 롱폼 세계에서 부를 것 → { pr, s, groupNum, sentIdx } | { error }
+  if (!_phone) return { error: '받기 창이 닫혔습니다' };
+  if (!S.parsed || S.parsed.kind === 'book' || S.scriptPath !== _phone.scriptPath) return { error: 'PC 에서 다른 대본으로 바뀌었습니다 — PC 받기 창을 다시 여세요' };
+  const pr = S.parsed.projects.find((p) => p.shortsNum === _phone.shortsNum); if (!pr) return { error: '편을 찾을 수 없습니다' };
+  const hit = _phoneFlat(pr).find((x) => x.s.id === _phone.sentId);
+  return hit ? { pr, ...hit } : { error: '받을 클립을 찾지 못했습니다 — PC 에서 클립을 다시 고르세요' };
+}
+const _phoneInfo = (t) => ({ groupNum: t.groupNum, sentIdx: t.sentIdx, num: t.s.num, text: String(t.s.text || ''), own: !!t.s.voiceOwn });
+function _phoneState() {
+  return WORLD.run('longform', () => { const t = _phoneTarget(); return t.error ? { ok: false, error: t.error } : { ok: true, ..._phoneInfo(t), done: _phone.done.slice(-20) }; });
+}
+async function _phoneOnFile({ path: fp, name, bytes }) {
+  return WORLD.run('longform', async () => {
+    const t = _phoneTarget(); if (t.error) return { ok: false, error: t.error };
+    const r = await _ownVoiceFromFile(t.pr, t.s, fp, { label: '📱 핸드폰 ' + name + ' (' + (bytes / 1048576).toFixed(1) + 'MB)' });
+    if (!r.ok) return r;
+    const line = `컷${t.s.num} · ${r.dur.toFixed(1)}초`;
+    _phone.done.push(line);
+    let next = null;
+    if (_phone.autoNext) { const fl = _phoneFlat(t.pr); const i = fl.findIndex((x) => x.s === t.s); next = i >= 0 ? fl[i + 1] || null : null; if (next) _phone.sentId = next.s.id; }
+    const nt = _phoneTarget(); const target = nt.error ? null : _phoneInfo(nt);
+    try { if (win && !win.isDestroyed()) win.webContents.send('phone-recv-got', { ok: true, num: t.s.num, dur: r.dur, trimmed: r.trimmed, name, target, last: !!(_phone.autoNext && !next), dto: P.toDTO(S.parsed) }); } catch {}
+    return { ok: true, msg: `컷${t.s.num} 에 넣었습니다 (${r.dur.toFixed(1)}초${r.trimmed > 0.05 ? ` · 앞뒤 무음 ${r.trimmed.toFixed(1)}초 자름` : ''})${_phone.autoNext && !next ? ' — 마지막 클립입니다' : ''}`, state: _phoneState() };
+  });
+}
+function _phoneStop() { if (_phone && _phone.srv) { try { _phone.srv.stop(); } catch {} } _phone = null; }
+ipcMain.handle('phone-recv-start', async (_e, args = {}) => {
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const s = _sentAt(c.pr, args.groupNum, args.sentIdx); if (!s) return { ok: false, error: '고른 클립이 없습니다' };
+  const PR = require('./core/phone-recv');
+  const smoke = !!process.env.PM_UI_SMOKE;
+  const addrs = smoke ? [{ ip: '127.0.0.1', name: '시험', kind: 'lan' }] : PR.lanAddrs();
+  if (!addrs.length) return { ok: false, error: '이 PC 가 Wi-Fi·랜에 연결돼 있지 않습니다 — 핸드폰과 같은 Wi-Fi 에 연결한 뒤 다시 여세요' };
+  if (!_phone || !_phone.srv || !_phone.srv.running) {
+    const srv = PR.createPhoneRecv({ host: smoke ? '127.0.0.1' : '0.0.0.0', getState: _phoneState, onFile: _phoneOnFile, log,
+      onIdleStop: () => { _phone = null; try { if (win && !win.isDestroyed()) win.webContents.send('phone-recv-got', { ok: false, closed: true }); } catch {} } });
+    try { await srv.start(); } catch (e) { return { ok: false, error: '받기 서버를 열지 못했습니다: ' + e.message }; }
+    _phone = { srv, done: [] };
+    log(`📱 핸드폰 받기 열림 — ${addrs.map((a) => a.ip).join(' · ')} :${srv.port} (창을 닫으면 닫힙니다)`);
+  }
+  Object.assign(_phone, { scriptPath: S.scriptPath, shortsNum: c.pr.shortsNum, sentId: s.id, autoNext: args.autoNext !== false });
+  const urls = addrs.map((a) => ({ ...a, url: _phone.srv.url(a.ip) }));
+  const t = _phoneTarget();
+  return { ok: true, urls, qrSvg: require('./core/qr').qrSvg(urls[0].url), target: t.error ? null : _phoneInfo(t) };
 });
+ipcMain.handle('phone-recv-target', async (_e, args = {}) => {
+  if (!_phone) return { ok: false, error: '받기 창이 닫혔습니다' };
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const s = _sentAt(c.pr, args.groupNum, args.sentIdx); if (!s) return { ok: false, error: '고른 클립이 없습니다' };
+  Object.assign(_phone, { scriptPath: S.scriptPath, shortsNum: c.pr.shortsNum, sentId: s.id });
+  if (args.autoNext != null) _phone.autoNext = !!args.autoNext;
+  const t = _phoneTarget();
+  return { ok: true, target: t.error ? null : _phoneInfo(t) };
+});
+ipcMain.handle('phone-recv-stop', async () => { const was = !!_phone; _phoneStop(); if (was) log('📱 핸드폰 받기 닫힘'); return { ok: true }; });
 // 🔇 기본 노이즈 줄이기(Lab · 남은 기능 ②) — 고른 클립이 든 문장의 소리에 ffmpeg afftdn 을 굽는다(s.denoise 0~3 · 0 = 끔).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], level } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 사본에 구워진다(볼륨과 같은 길) · Ctrl+Z 한 번
 ipcMain.handle('clip-denoise', async (_e, args = {}) => {

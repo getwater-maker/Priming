@@ -2206,3 +2206,15 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .rec-meter{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
 .rec-meter > span{display:block;height:100%;width:0%;background:var(--sky);transition:width .06s linear}
 .rec-panel audio{width:100%}
+
+/* 📱 핸드폰에서 받기 창(v1.0.53) */
+/* 키가 큰 창(녹음·핸드폰)은 화면 가운데 · 창보다 크면 안에서 스크롤(위 26% 자리에서 시작하면 800px 창에서 닫기 단추가 화면 밖으로 나갔다 · 시험 실측) */
+.vr-menu.zr-panel.phone-panel,.vr-menu.zr-panel.rec-panel{top:50%;transform:translate(-50%,-50%);max-height:calc(100vh - 32px);overflow:auto}
+.phone-panel{width:min(620px,94vw)}
+.phone-panel .rec-text{max-height:120px}
+.phone-top{display:flex;gap:14px;align-items:flex-start}
+.phone-qr{flex:0 0 180px;width:180px;height:180px;border-radius:var(--r-md);overflow:hidden;border:1px solid var(--line)}
+.phone-qr svg{width:100%;height:100%;display:block}
+.phone-how{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-lg);min-width:0}
+.phone-url{word-break:break-all;user-select:text}
+@media (max-width:560px){.phone-top{flex-direction:column}}

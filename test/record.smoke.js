@@ -53,7 +53,7 @@ function mk(parts) {
   ok(/data-testid="rec-panel"/.test(APP) && /tid="cx-rec"/.test(APP) && /data-testid="rb-record"/.test(APP) && /data-testid="rb-v-record"/.test(APP) && /data-testid="rb-v-file"/.test(APP), '녹음 창 · 우클릭 · 편집 탭 · AI 목소리 탭 단추');
   ok(/use-fake-device-for-media-stream/.test(BS) && /if \(process\.env\.PM_UI_SMOKE\)/.test(BS.slice(BS.indexOf('use-fake-device') - 200, BS.indexOf('use-fake-device'))), '가짜 마이크 스위치는 E2E(PM_UI_SMOKE)일 때만');
   const OW = M.slice(M.indexOf("ipcMain.handle('clip-voice-overwrite'"), M.indexOf("ipcMain.handle('clip-denoise'"));
-  ok(/QT\.trimEdges\(/.test(OW) && /args\.trim !== false/.test(OW), '덮어쓰기(파일·마이크 둘 다)는 앞뒤 무음을 자른다');
+  ok(/QT\.trimEdges\(/.test(OW) && /o\.trim !== false/.test(OW) && /await _ownVoiceFromFile\(/.test(OW), '덮어쓰기(파일·마이크·핸드폰 모두 _ownVoiceFromFile 한 길)는 앞뒤 무음을 자른다');
 
   console.log('\n[2] 실제 앱 — 마이크 녹음');
   const errors = [];

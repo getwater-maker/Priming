@@ -920,6 +920,8 @@ export default function App() {
   const [recPanel, setRecPanel] = useState(null);
   const recRef = useRef({ mr: null, chunks: [], stream: null, timer: null, blob: null, ac: null, raf: 0 });
   const recLevelRef = useRef(null);   // 소리 크기 막대(DOM 을 직접 고친다 — 매 프레임 다시 그리지 않게)
+  // 📱 핸드폰에서 받기 창(v1.0.53) — { sn, urls:[{ip,kind,url}], qr(svg), target:{groupNum,sentIdx,num,text,own}|null, auto, got:[], err, busy }
+  const [phonePanel, setPhonePanel] = useState(null);
   // 🧭 Vrew 식 작업 화면(v0.5.42) — 메뉴(리본) · 보기(클립/카드) · ① 칸 폭 · 커서(자막 줄)
   // 메뉴는 켤 때마다 「대본·음성」부터(Vrew 도 홈부터) — 기억해 두면 다음 실행이 엉뚱한 메뉴로 열려 「열기」가 안 보인다
   const [menu, setMenu] = useState('home');
@@ -5365,7 +5367,7 @@ export default function App() {
     });
     setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: abs ? 'center' : 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg || recPanel);
+  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg || recPanel || phonePanel);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -6309,6 +6311,7 @@ export default function App() {
   const ribMyVoice = () => (<span className="hgroup" data-testid="rib-myvoice"><span className="glabel">내 목소리</span>
     <button data-testid="rb-v-record" disabled={!selOk} title="녹음 — 고른 클립 하나를 마이크로 녹음해 그 음성으로 바꿉니다(문장 글을 보며 녹음 · Space 녹음/정지 · Enter 덮어쓰고 다음 클립)" onClick={openRec}><span className="rb-ic">🎤</span> <span className="rb-t">녹음</span></button>
     <button data-testid="rb-v-file" disabled={!selOk} title="녹음 파일 — 휴대폰 등으로 녹음한 파일(m4a·mp3·wav…)을 고른 클립 하나의 음성으로 넣습니다(앞뒤 무음은 자동으로 자름)" onClick={() => clipVoiceOverwrite(false)}><span className="rb-ic">📂</span> <span className="rb-t">파일</span></button>
+    <button data-testid="rb-v-phone" disabled={!selOk} title="핸드폰에서 받기 — QR 을 핸드폰 카메라로 찍으면 핸드폰에서 녹음 파일을 바로 보낼 수 있습니다(같은 Wi-Fi · 받을 때마다 다음 클립으로)" onClick={openPhone}><span className="rb-ic">📱</span> <span className="rb-t">핸드폰</span></button>
     <button data-testid="rb-v-clear" disabled={!selOk} title="녹음 해제 — 고른 클립의 내 녹음을 빼고 AI 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}><span className="rb-ic">↩</span> <span className="rb-t">해제</span></button>
   </span>);
   const ribVoiceExtra = () => (
@@ -6937,6 +6940,52 @@ export default function App() {
     return () => window.removeEventListener('keydown', h);
   }, [!!recPanel]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { try { recCleanup(); } catch (_) {} }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 📱 핸드폰에서 받기(v1.0.53 · 로이 2026-11-17) — main 이 같은 Wi-Fi 에 페이지를 열고(QR) 핸드폰이 녹음을 올리면 고른 클립 음성이 된다(덮어쓰기 한 길)
+  //   받을 때마다 다음 클립으로(끄기 가능) · ◀ ▶ 로 받을 클립을 옮김 · 창을 닫으면 서버도 닫힌다
+  function selectClipLine(sn, l) {
+    userCursor({ shortsNum: sn, n: l.n });
+    setCapSel({ shortsNum: sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n });
+    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
+  }
+  function lineOfSent(sn, groupNum, sentIdx) { const PL = linesMap.get(sn); return PL ? PL.list.find((x) => x.groupNum === groupNum && x.sentIdx === sentIdx) || null : null; }
+  async function openPhone() {
+    if (!clipSelOk()) { setStatus('📱 핸드폰 녹음을 넣을 클립을 먼저 고르세요'); return; }
+    const uniq = new Set(capSel.items.map((x) => x.groupNum + ':' + x.sentIdx));
+    if (uniq.size !== 1) { setStatus('📱 클립 하나를 고르세요(받은 녹음 한 개 = 문장 한 개)'); return; }
+    setClipMenu(null); setClipCtx(null);
+    const it = capSel.items[0]; const sn = capSel.shortsNum;
+    setPhonePanel({ sn, urls: [], qr: '', target: null, auto: true, got: [], err: '', busy: true });
+    try {
+      const r = await api.phoneRecvStart({ shortsNum: sn, groupNum: it.groupNum, sentIdx: it.sentIdx, autoNext: true });
+      if (!r || !r.ok) { setPhonePanel((p) => (p ? { ...p, busy: false, err: (r && r.error) || '열지 못했습니다' } : p)); return; }
+      setPhonePanel((p) => (p ? { ...p, busy: false, urls: r.urls, qr: r.qrSvg, target: r.target } : p));
+    } catch (e) { setPhonePanel((p) => (p ? { ...p, busy: false, err: e.message } : p)); }
+  }
+  async function phoneClose() { setPhonePanel(null); try { await api.phoneRecvStop(); } catch (_) {} }
+  async function phoneMove(dir) {
+    const p = phonePanel; if (!p || !p.target) return;
+    const PL = linesMap.get(p.sn); if (!PL) return;
+    const keys = []; for (const x of PL.list) { const k = x.groupNum + ':' + x.sentIdx; if (!keys.length || keys[keys.length - 1].k !== k) keys.push({ k, l: x }); }
+    const i = keys.findIndex((x) => x.k === p.target.groupNum + ':' + p.target.sentIdx); const nx = keys[i + dir];
+    if (i < 0 || !nx) return;
+    const r = await api.phoneRecvTarget({ shortsNum: p.sn, groupNum: nx.l.groupNum, sentIdx: nx.l.sentIdx });
+    if (r && r.ok) { setPhonePanel((q) => (q ? { ...q, target: r.target, err: '' } : q)); selectClipLine(p.sn, nx.l); }
+  }
+  async function phoneSetAuto(v) {
+    const p = phonePanel; if (!p) return; setPhonePanel({ ...p, auto: v });
+    if (p.target) { try { await api.phoneRecvTarget({ shortsNum: p.sn, groupNum: p.target.groupNum, sentIdx: p.target.sentIdx, autoNext: v }); } catch (_) {} }
+  }
+  const phoneGotRef = useRef(null);
+  phoneGotRef.current = (d) => {
+    if (!d) return;
+    if (d.closed) { setPhonePanel(null); setStatus('📱 30분 동안 쓰지 않아 핸드폰 받기를 닫았습니다'); return; }
+    if (d.dto) setDto(d.dto);
+    const msg = `📱 컷${d.num} 핸드폰 녹음을 넣었습니다 (${Number(d.dur || 0).toFixed(1)}초${d.trimmed > 0.05 ? ` · 앞뒤 무음 ${d.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)${d.last ? ' — 마지막 클립입니다' : ''}`;
+    setStatus(msg);
+    setPhonePanel((p) => (p ? { ...p, target: d.target || p.target, got: [...p.got, `컷${d.num} · ${Number(d.dur || 0).toFixed(1)}초`].slice(-30), err: '' } : p));
+    if (d.target) { const sn = phonePanel ? phonePanel.sn : null; const l = sn != null ? lineOfSent(sn, d.target.groupNum, d.target.sentIdx) : null; if (l) selectClipLine(sn, l); }
+  };
+  useEffect(() => (api.onPhoneRecvGot ? api.onPhoneRecvGot((d) => phoneGotRef.current && phoneGotRef.current(d)) : undefined), []);   // eslint-disable-line react-hooks/exhaustive-deps
   // 🎙 음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음으로(clear = 해제). 파일 고르기는 main 이 연다
   async function clipVoiceOverwrite(clear) {
     setClipMenu(null); setClipCtx(null);
@@ -7281,6 +7330,7 @@ export default function App() {
               <div className="vr-sep" />
               <button data-testid="ctb-voice-rec" title="고른 클립 하나의 음성을 마이크로 녹음해 바꿉니다(문장 글을 보며 녹음 · Space 녹음/정지 · Enter 덮어쓰고 다음 클립)" onClick={openRec}>🎙 마이크로 녹음</button>
               <button data-testid="ctb-voice-file" title="휴대폰 등으로 녹음한 파일(m4a·mp3·wav…)을 고른 클립 하나의 음성으로 넣습니다(앞뒤 무음은 자동으로 자름)" onClick={() => clipVoiceOverwrite(false)}>📂 녹음 파일 넣기</button>
+              <button data-testid="ctb-voice-phone" title="QR 을 핸드폰 카메라로 찍어 핸드폰에서 녹음 파일을 바로 보냅니다(같은 Wi-Fi)" onClick={openPhone}>📱 핸드폰에서 받기</button>
               {capSel && capSel.items.some((it) => { const s = capSentence(capSel.shortsNum, it.groupNum, it.sentIdx); return s && s.ow; }) &&
                 <button data-testid="ctb-voice-clear" title="고른 클립의 내 녹음을 빼고 AI 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}>↩ 내 녹음 해제</button>}
             </div>}
@@ -7418,6 +7468,34 @@ export default function App() {
               <button className="ghost" data-testid="rec-skip" disabled={recPanel.st === 'rec' || recPanel.st === 'busy'} title="이 클립은 그대로 두고 다음 클립으로" onClick={() => recGoNext(recPanel, '')}>건너뛰기 ▷</button>
               <button className="ghost" data-testid="rec-close" disabled={recPanel.st === 'busy'} title="Esc" onClick={recClose}>닫기</button>
             </div>
+          </div>}
+          {phonePanel && <div className="vr-menu-bg" />}
+          {phonePanel && <div className="vr-menu zr-panel phone-panel" data-testid="phone-panel" data-url={phonePanel.urls[0] ? phonePanel.urls[0].url : ''} onMouseDown={(e) => e.stopPropagation()}>
+            <b>📱 핸드폰에서 받기</b>
+            {phonePanel.busy && <span className="meta">여는 중…</span>}
+            {phonePanel.err && <span className="meta rec-err" data-testid="phone-err">⚠ {phonePanel.err}</span>}
+            {phonePanel.qr && <div className="phone-top">
+              <div className="phone-qr" data-testid="phone-qr" dangerouslySetInnerHTML={{ __html: phonePanel.qr }} />
+              <div className="phone-how">
+                <div>① 핸드폰 <b>카메라</b>로 QR 을 찍으세요</div>
+                <div>② 열린 페이지에서 <b>🎙 녹음해서 보내기</b> 또는 <b>📂 녹음 파일 고르기</b></div>
+                <div>③ 보낸 녹음이 아래 클립의 음성이 됩니다</div>
+                <div className="meta phone-url" data-testid="phone-url">{phonePanel.urls[0].url}</div>
+                {phonePanel.urls.slice(1).map((u) => <div key={u.url} className="meta phone-url">{u.kind === 'tailscale' ? 'Tailscale: ' : '다른 주소: '}{u.url}</div>)}
+              </div>
+            </div>}
+            {phonePanel.target && <>
+              <span className="meta" data-testid="phone-target">지금 넣을 클립: 컷{phonePanel.target.num}{phonePanel.target.own ? ' · 🎙 이미 내 녹음(새로 받으면 바뀝니다)' : ''}</span>
+              <div className="rec-text" data-testid="phone-text">{phonePanel.target.text || '(글 없음)'}</div>
+              <div className="rec-row">
+                <button className="ghost" data-testid="phone-prev" onClick={() => phoneMove(-1)}>◀ 이전 클립</button>
+                <button className="ghost" data-testid="phone-next" onClick={() => phoneMove(1)}>다음 클립 ▶</button>
+                <label className="meta"><input type="checkbox" data-testid="phone-auto" checked={phonePanel.auto} onChange={(e) => phoneSetAuto(e.target.checked)} /> 받으면 다음 클립으로</label>
+              </div>
+            </>}
+            {phonePanel.got.length > 0 && <span className="meta" data-testid="phone-got">받은 것: {phonePanel.got.slice(-6).join(' · ')}</span>}
+            <span className="meta">핸드폰에서 안 열리면 — PC 와 핸드폰이 <b>같은 Wi-Fi</b> 인지 · 처음 한 번 뜨는 <b>Windows 방화벽 창에서 「허용」</b>을 눌렀는지 보세요(공용 네트워크로 잡힌 Wi-Fi 는 막힐 수 있습니다). 창을 닫으면 받기도 닫힙니다.</span>
+            <div className="zr-btns"><button data-testid="phone-close" onClick={phoneClose}>닫기</button></div>
           </div>}
           {scenePanel && <div className="vr-menu-bg" onMouseDown={() => setScenePanel(null)} />}
           {scenePanel && <div className="vr-menu zr-panel scene-panel" data-testid="scene-panel" onMouseDown={(e) => e.stopPropagation()}>
@@ -7628,6 +7706,7 @@ export default function App() {
             <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" onClick={clipNewScene} tid="cx-newscene" />
             <Row icon="🎙" label="음성 덮어쓰기" onClick={() => clipVoiceOverwrite(false)} tid="cx-overwrite-voice" />
             <Row icon="🎤" label="녹음해서 덮어쓰기" onClick={() => openRec()} tid="cx-rec" />
+            <Row icon="📱" label="핸드폰에서 받기" onClick={() => openPhone()} tid="cx-phone" />
             <Row icon="↩" label="덮어쓴 음성 해제" onClick={() => clipVoiceOverwrite(true)} tid="cx-overwrite-clear" />
             <div className="vr-sep" />
             <Row icon="⚑" label="마커" kbd={(() => { const ss = capSel ? capSel.items.map((it) => capSentence(capSel.shortsNum, it.groupNum, it.sentIdx)).filter(Boolean) : []; return ss.length && ss.every((s) => s.mk) ? '✓' : null; })()} onClick={run(() => clipMarker('toggle'))} tid="cx-marker" />
