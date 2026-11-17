@@ -119,6 +119,7 @@ function mk(parts) {
     // Esc 로 닫기 · 마이크가 꺼진다
     await pick(2); await ctx(2); await win.click('[data-testid="cx-rec"]'); await win.waitForSelector('[data-testid="rec-panel"]');
     await win.click('[data-testid="rec-start"]'); await win.waitForSelector('[data-testid="rec-live"]', { timeout: 8000 });
+    await win.waitForTimeout(1000);   // 바로 멈추면 녹음 조각이 비어 「녹음된 소리가 없습니다」가 된다(시험이 한 번 걸림)
     await win.click('[data-testid="rec-stop"]'); await win.waitForSelector('[data-testid="rec-audio"]', { timeout: 8000 });
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     ok(await win.locator('[data-testid="rec-panel"]').count() === 0 && (await sents())[1].ow === 0, 'Esc → 덮어쓰지 않고 닫힌다');
@@ -133,6 +134,30 @@ function mk(parts) {
     execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono:d=1', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=2:sample_rate=44100', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono:d=1.5', '-filter_complex', '[0][1][2]concat=n=3:v=0:a=1', '-c:a', 'aac', rec]);
     const r3 = await win.evaluate(async (p) => window.api.clipVoiceOverwrite({ shortsNum: 1, items: [{ groupNum: 1, sentIdx: 1 }], path: p }), rec);
     ok(r3 && r3.ok && Math.abs(r3.dur - 2.4) < 0.15, `m4a → 말 2초 + 앞 0.15 + 뒤 0.25 ≈ 2.4초 (${r3 && r3.dur && r3.dur.toFixed(2)} · 잘라낸 ${r3 && r3.trimmed && r3.trimmed.toFixed(2)})`);
+
+    console.log('\n[4] 클립 막대 「☰ 목소리 수정」 메뉴에서도');
+    const voiceMenu = async (ln) => {
+      await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(150);
+      await win.locator(`.sent[data-ln="${ln}"]`).first().evaluate((e) => e.scrollIntoView({ block: 'center' })); await win.waitForTimeout(150);
+      await win.locator(`.sent[data-ln="${ln}"] .clip-chk`).first().click(); await win.waitForTimeout(250);
+      await win.waitForSelector('[data-testid="clip-tb"]', { timeout: 5000 });
+      await win.click('[data-testid="ctb-voice"]'); await win.waitForSelector('[data-testid="ctb-voice-menu"]', { timeout: 3000 });
+    };
+    await voiceMenu(3);
+    ok(await win.locator('[data-testid="ctb-voice-rec"]').count() === 1 && await win.locator('[data-testid="ctb-voice-file"]').count() === 1, '🎙 마이크로 녹음 · 📂 녹음 파일 넣기 항목');
+    ok(await win.locator('[data-testid="ctb-voice-clear"]').count() === 0, '내 녹음이 없는 클립이면 해제 항목은 숨는다');
+    await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }); }, rec);
+    await win.click('[data-testid="ctb-voice-file"]'); await win.waitForTimeout(2500);
+    s = await sents();
+    ok(s[2].ow === 1, `📂 녹음 파일 넣기 → 3번 문장 내 녹음 ${JSON.stringify(s.map((x) => x.ow))}`);
+    await voiceMenu(3);
+    ok(await win.locator('[data-testid="ctb-voice-clear"]').count() === 1, '내 녹음이 있는 클립이면 ↩ 내 녹음 해제가 보인다');
+    await win.click('[data-testid="ctb-voice-clear"]'); await win.waitForTimeout(800);
+    ok((await sents())[2].ow === 0, '↩ 해제 → 3번 문장 내 녹음이 빠졌다');
+    await voiceMenu(1);
+    await win.click('[data-testid="ctb-voice-rec"]'); await win.waitForSelector('[data-testid="rec-panel"]', { timeout: 3000 });
+    ok((await win.locator('[data-testid="rec-text"]').innerText()).includes('첫 문장은'), '🎙 마이크로 녹음 → 그 클립 녹음 창');
+    await win.keyboard.press('Escape'); await win.waitForTimeout(300);
     ok(errors.length === 0, '화면 오류 없음 ' + errors.join(' | ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외 ' + (e && e.stack || e)); }
   finally { await app.close().catch(() => {}); for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force: true }); } catch {} } try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} }

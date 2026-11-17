@@ -7277,6 +7277,12 @@ export default function App() {
             {clipMenu === 'voice' && <div className="vr-menu clip-tb-menu" data-testid="ctb-voice-menu" style={{ right: 0, ...tbFlip }}>
               <button data-testid="ctb-voice-redo" title="고른 클립의 문장 음성을 채널 목소리·시드 그대로 다시 만듭니다(글을 고친 뒤)" onClick={() => clipTts(false)}>🎤 다시 만들기</button>
               <button data-testid="ctb-voice-roll" title="시드를 바꿔 같은 문장을 다른 억양·톤으로 새로 뽑습니다(이 문장들만 톤이 달라집니다)" onClick={() => clipTts(true)}>🎲 다른 톤으로 새로 뽑기</button>
+              {/* 🎙 내 목소리(v1.0.52 · 로이 2026-11-17) — AI 목소리 탭 「내 목소리」와 같은 함수(클립 하나 = 문장 하나) */}
+              <div className="vr-sep" />
+              <button data-testid="ctb-voice-rec" title="고른 클립 하나의 음성을 마이크로 녹음해 바꿉니다(문장 글을 보며 녹음 · Space 녹음/정지 · Enter 덮어쓰고 다음 클립)" onClick={openRec}>🎙 마이크로 녹음</button>
+              <button data-testid="ctb-voice-file" title="휴대폰 등으로 녹음한 파일(m4a·mp3·wav…)을 고른 클립 하나의 음성으로 넣습니다(앞뒤 무음은 자동으로 자름)" onClick={() => clipVoiceOverwrite(false)}>📂 녹음 파일 넣기</button>
+              {capSel && capSel.items.some((it) => { const s = capSentence(capSel.shortsNum, it.groupNum, it.sentIdx); return s && s.ow; }) &&
+                <button data-testid="ctb-voice-clear" title="고른 클립의 내 녹음을 빼고 AI 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}>↩ 내 녹음 해제</button>}
             </div>}
           </div>
         </>);
