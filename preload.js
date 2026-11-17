@@ -244,6 +244,11 @@ contextBridge.exposeInMainWorld('api', {
   crashDismiss: () => ipcRenderer.invoke('crash-dismiss'),
   clearSaves: () => ipcRenderer.invoke('clear-saves'),
   runBatch: (args) => ipcRenderer.invoke('run-batch', args),
+  inboxState: () => ipcRenderer.invoke('inbox-state'),   // 📥 받은 편지함 = 1.0 자동 넘김(v1.0.57)
+  inboxPause: (paused) => ipcRenderer.invoke('inbox-pause', { paused: !!paused }),
+  inboxResume: () => ipcRenderer.invoke('inbox-resume'),
+  uiBusy: (on) => ipcRenderer.invoke('ui-busy', !!on),   // 화면 큐 루프 중 — 자동 제작이 끼어들지 않게
+  onInboxEvent: (cb) => ipcRenderer.on('inbox-event', (_e, d) => cb(d)),
   readAudio: (p) => ipcRenderer.invoke('read-audio', p),
   setMode: (args) => ipcRenderer.invoke('set-mode', args),
   getScriptText: () => ipcRenderer.invoke('get-script-text'),

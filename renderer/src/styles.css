@@ -216,6 +216,9 @@ button.stop:hover{background:var(--crimson);border-color:var(--crimson);color:va
 button.stop-after{background:var(--bg-ffffff);color:var(--fg-b9770e);border-color:var(--bd-e6c98f)}
 button.stop-after:hover{background:var(--bg-b9770e);border-color:var(--bd-b9770e);color:var(--fg-ffffff)}
 button.stop-after.armed{background:var(--bg-f5b041);border-color:var(--bd-b9770e);color:var(--fg-3b2a05);font-weight:700}
+/* 📥 자동 제작(받은 편지함 · v1.0.57) — 멈춤 = 노랑(⏸ 이번 편까지만과 같은 색) · 보류 = 노랑 테두리 · 숫자 = 받은 편 남은 수 */
+button.auto-make.paused,button.auto-make.held{background:var(--bg-f5b041);border-color:var(--bd-b9770e);color:var(--fg-3b2a05);font-weight:700}
+button.auto-make .am-n{display:inline-block;margin-left:4px;padding:0 5px;border-radius:8px;background:var(--bg-b9770e);color:var(--fg-ffffff);font-size:11px;line-height:15px}
 h1{font-size:17px;color:var(--strong);margin:0;font-weight:700}
 .grow{flex:1}
 button{font-family:inherit;font-size:var(--fs-md);border:1px solid var(--accent);background:var(--accent);color:var(--fg-ffffff);

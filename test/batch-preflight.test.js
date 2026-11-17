@@ -27,8 +27,8 @@ ok(r[1].id === 'd' && r[1].idx === 4, '넷째 대본 · 번호 4');
 ok(pf(plan, items.map((x) => ({ ...x, parsed: x.parsed && P(0) })), info).length === 0, '모두 확인되면 빈 목록(판정력)');
 
 console.log('[2] run-batch 가 시작 전에 점검한다');
-const rb = MAIN.indexOf("ipcMain.handle('run-batch'");
-const loop = MAIN.indexOf('for (let i = 0; i < plan.length; i++)', rb);
+const rb = MAIN.indexOf('function _runBatch(');   // v1.0.57 — ⚡ 만들기(IPC)와 📥 자동 제작이 같은 _runBatch
+const loop = MAIN.indexOf('for (let i = 0; ; i++)', rb);
 const call = MAIN.indexOf('_batchPreflight(plan', rb);
 ok(rb > 0 && call > rb && call < loop, '점검 호출이 대본 루프보다 앞에 있다');
 const abortReset = MAIN.indexOf('S.abort = false;', rb);

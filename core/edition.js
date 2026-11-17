@@ -50,6 +50,8 @@ const FEATURES = {
   royBank:      { label: '🟥 경험은행', editions: S, files: ['core/roy-bank.js'], channels: [/^roy-/] },
   thumbEdit:    { label: '🖼 썸네일 편집기', editions: S, files: ['core/thumb-edit.js', 'core/thumb-find.js'], channels: [/^thumb-edit-/, /^list-thumbs$/], reply: { files: [], msg: '' } },
   todayScripts: { label: '📅 오늘 대본', editions: S, files: ['core/today-scripts.js'], channels: [/^today-scripts-/] },
+  // 📥 받은 편지함 = 1.0 자동 넘김(v1.0.57 · 채널사업부 무인집필 → 화면 앱 작업큐) — 로이 PC 전용
+  inbox:        { label: '📥 받은 편지함(자동 넘김)', editions: S, files: ['core/inbox.js'], channels: [/^inbox-/], reply: { on: false } },
   charSheets:   { label: '👤 캐릭터셋 보기', editions: S, owner: true, files: ['core/char-sheets.js'], channels: [/^list-char-sheets$/], reply: { cards: [], byGroup: {}, msg: '' } },
   ytCookie:     { label: '🔑 유튜브 로그인', editions: S, owner: true, files: ['core/yt-login.js', 'core/yt-cookies.js'], channels: [/^yt-login-/], reply: { allowed: false, connected: false } },
   // ⚠ core/gpu-share.js 는 남긴다 — 음성 서버 GPU 차례(omnivoice-provider)가 같이 쓴다

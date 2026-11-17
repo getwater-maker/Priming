@@ -519,6 +519,11 @@ app.whenReady().then(() => {
   //   (각 대본의 작업물은 .smproj 자동저장에 남아 있어, 대본을 다시 열면 그 대본만 이어집니다.)
   try { _crashInfo = require('./core/session-lock').begin(sessionLockFile(), { version: (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version; } catch { return ''; } })() }); } catch {}
   createWindow();
+  // 🪟 두 번째 실행(bootstrap 의 단일 실행 잠금이 넘겨준 명령줄) — 켜지는 동안 온 것도 여기서 마저
+  global.__pmOnSecond = (argv) => { try { _onSecondInstance(argv); } catch (_) {} };
+  for (const a of (global.__pmSecond || []).splice(0)) global.__pmOnSecond(a);
+  // 📥 받은 편지함 = 1.0 자동 넘김(v1.0.57) — 첫 화면이 뜬 뒤 누가 누르지 않아도 쪽지를 큐에 넣고, 큐가 놀면 바로 만든다
+  try { _inboxStart(); } catch (e) { log('📥 받은 편지함을 시작하지 못했습니다: ' + e.message); }
   if (_crashInfo.crashed) setTimeout(() => log(`🩹 지난번(${(_crashInfo.prev && _crashInfo.prev.version) ? 'v' + _crashInfo.prev.version : ''} 시작분)에 앱이 정상적으로 닫히지 않았습니다 — 「♻ 지난 큐 다시 열기」나 「🕘 백업」으로 이어갈 수 있습니다`), 1500);
   // 로그 파일에 세션 구분선 — 하루치 파일 안에서 "몇 시 실행의 로그인지" 가 보여야 한다.
   //   ⚠ log() 가 아니라 logToFile() 이다 — 화면 로그창까지 이 줄로 시작할 필요는 없다.
@@ -1860,13 +1865,13 @@ ipcMain.handle('open-script', async (_e, args = {}) => {
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
 // 📂 대본 파일들을 롱폼 큐에 연다 — 「📂 열기」와 「📅 오늘 대본」이 같은 길을 탄다. entries = [{scriptPath, preset, settings}] → 연 개수
-async function _openScriptEntries(entries) {
+async function _openScriptEntries(entries, opts = {}) {   // opts.keepView = 화면 세계를 롱폼으로 돌리지 않는다(📥 받은 편지함 — 로이가 출판을 보는 중일 수 있다)
   let okN = 0;
   for (const { scriptPath, preset, settings } of entries) {
     try {
       S.scriptPath = scriptPath;
       S.mode = 'longform';   // 영상 대본은 롱폼 단일 모드 (쇼츠 모드는 2026-08-22 제거)
-      WORLD.setView('longform');   // 열기 응답(r.mode)으로 화면이 롱폼으로 바뀐다 — 호출을 따르는 세계도 같이
+      if (!opts.keepView) WORLD.setView('longform');   // 열기 응답(r.mode)으로 화면이 롱폼으로 바뀐다 — 호출을 따르는 세계도 같이
       S.preset = preset;
       S.outRoot = computeOutRoot(scriptPath, preset, S.mode);
 
@@ -1961,6 +1966,308 @@ ipcMain.handle('open-scripts-list', async (_e, args = {}) => {
   log(`📅 ${okN}/${entries.length}편 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
+
+// ── 📥 1.0 자동 넘김 — 받은 편지함 → 이 화면 앱의 작업큐 → 이어서 제작(v1.0.57 · docs/요청서_1.0자동넘김_렌더큐_2026-11-17.md 1단계 ①~⑥) ──
+//   ⛔ 화면 없는 tools/order.js 가 아니다 — 로이가 쓰는 화면 앱의 큐에 넣고 같은 run-batch 로 만든다(진행은 화면이 정본 · progress.json 은 사본).
+//   켜는 스위치 없음(로이 11-17 밤) — 큐가 놀면 받은 편만 바로 만든다 · 「⏸ 자동 제작 멈춤」 하나(이 PC 에 저장 — core/inbox.loadState).
+//   ■ 중단 · ⏸ 이번 편까지만 · 연속 실패 2편 = 이번 실행 동안만 자동 시작 보류(hold) — 머리 단추 「▶ 자동 이어 가기」나 앱을 다시 켜면 풀린다.
+//   앱이 꺼졌다 켜지면 inbox\진행중 의 쪽지를 다시 큐에 넣는다(「시작은 빈 화면」은 사람이 연 대본에만 — 받은 편만 되살린다).
+//   로이가 직접 넣은 대본은 자동으로 돌리지 않는다(it.inbox 표시가 있는 항목만).
+const AUTO = {
+  on: false, timer: null, ticking: false, paused: false, hold: '', running: false,
+  uiBusy: false, uiLoaded: false, idleTicks: 0, resumed: false,
+  items: new Map(),   // 대본 경로(소문자) → { note: 진행중 쪽지, key, channel, acceptedAt, made }
+  finished: [],       // 끝난 편(최근 50) — progress.json
+  waiting: 0, failStreak: 0, lastReject: null, cur: null,
+  allow: ['01_로이의고전이야기'],   // 🧪 받을 채널(시범 · auto-make.json allowChannels · 틱마다 다시 읽는다)
+  batches: 0, extended: 0,   // 이번 실행에서 자동 제작을 시작한 번 · 만드는 중에 받아 이어 붙인 편(진단·시험)
+  prog: { at: 0, s: '', sig: '' },
+};
+const _ibKey = (p) => path.resolve(String(p || '')).toLowerCase();
+function _inboxOn() { return feat('inbox') && !HEADLESS && (!process.env.PM_UI_SMOKE || !!process.env.PM_INBOX_HOME); }
+function _inboxState() {
+  const pend = S.modes.longform.items.filter((it) => it.inbox && AUTO.items.has(_ibKey(it.scriptPath))).length;
+  return { on: AUTO.on, paused: AUTO.paused, hold: AUTO.hold, running: AUTO.running, waiting: AUTO.waiting, pending: pend, lastReject: AUTO.lastReject, batches: AUTO.batches, extended: AUTO.extended, allow: AUTO.allow.slice() };
+}
+function _inboxEmit(type, extra = {}) { try { if (win && !win.isDestroyed()) win.webContents.send('inbox-event', { type, ...extra, state: _inboxState() }); } catch (_) {} }
+function _inboxFinished(rec, result, reason = '') {
+  AUTO.finished.push({ key: rec.key, channel: rec.channel || '', result, reason: String(reason || '').slice(0, 300), at: require('./core/inbox').kst() });
+  if (AUTO.finished.length > 50) AUTO.finished.splice(0, AUTO.finished.length - 50);
+}
+// 받을 채널 = 롱폼 채널 중 「대본 폴더」가 있는 것(📅 오늘 대본과 같은 모음) · 🧪 시험만 임시 채널(__…)도
+function _inboxChannels() {
+  return require('./tts/preset-store').loadAll().filter((p) => p && p.name && (!p.name.startsWith('__') || process.env.PM_UI_SMOKE) && (p.startMode || 'longform') === 'longform' && p.scriptFolder);
+}
+function _inboxReject(file, reason, detail, text = null) {
+  const IB = require('./core/inbox');
+  try { IB.moveNote(file, IB.SUB.reject, { reason, detail: detail || '', rejectedAt: IB.kst(), priming: 'v' + appDiskVersion() }, text); } catch (e) { log(`📥 쪽지를 거절 폴더로 옮기지 못했습니다(${path.basename(file)}): ${e.message}`); }
+  AUTO.lastReject = { name: path.basename(file), reason, detail: detail || '', at: IB.kst() };
+  log(`📥 받지 않음 — ${path.basename(file)} : ${reason}${detail ? ' (' + detail + ')' : ''}`);
+}
+// 받은 편들을 큐에 넣는다 — 화면이 보던 대본·세계는 그대로 둔다(큐가 비어 있었으면 첫 편을 보여 준다)
+async function _inboxOpen(list) {
+  const q = S.modes.longform;
+  const prev = q.activeId;
+  await _openScriptEntries(list.map((b) => { const p = P.getPreset(b.channel) || b.preset; return { scriptPath: b.scriptPath, preset: p, settings: _channelItemSettings(p) }; }), { keepView: true });
+  const IB = require('./core/inbox');
+  let n = 0;
+  for (const b of list) {
+    const it = q.items.find((x) => _ibKey(x.scriptPath) === _ibKey(b.scriptPath));
+    if (!it) { try { IB.finishNote(b.note, IB.SUB.reject, { reason: '대본 열기 실패', detail: '로그를 보세요', rejectedAt: IB.kst() }); } catch (_) {} AUTO.lastReject = { name: path.basename(b.note), reason: '대본 열기 실패', at: IB.kst() }; continue; }
+    it.inbox = true;
+    AUTO.items.set(_ibKey(b.scriptPath), { note: b.note, key: b.key, channel: b.channel, acceptedAt: IB.kst() });
+    n++;
+  }
+  if (prev && q.items.some((x) => x.id === prev)) { q.activeId = prev; syncActiveToS(); }
+  writeWorkspace();
+  _inboxEmit('opened', { queue: queueDTO(), selectId: prev ? null : q.activeId, n });
+  return n;
+}
+// 앱을 켤 때 한 번 — 진행중 쪽지(지난번에 큐에 넣었는데 끝나기 전에 꺼진 편)를 다시 큐에 넣는다
+async function _inboxResumeDoing() {
+  const IB = require('./core/inbox');
+  const notes = IB.listNotes(path.join(IB.inboxDir(), IB.SUB.doing));
+  if (!notes.length) return;
+  const uploaded = _uploadedNames(), chans = _inboxChannels(), list = [];
+  for (const n of notes) {
+    const r = IB.readNote(n.file);
+    if (!r.ok) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: r.reason, detail: r.detail, rejectedAt: IB.kst() }); } catch (_) {} continue; }
+    const sp = r.note.script, key = IB.noteKey(r.note);
+    if (S.modes.longform.items.some((x) => _ibKey(x.scriptPath) === _ibKey(sp))) continue;
+    if (!fs.existsSync(sp)) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: IB.REASON.noScript, detail: sp, rejectedAt: IB.kst() }); } catch (_) {} continue; }
+    const ch = IB.pickChannel(sp, chans);
+    if (!ch.ok) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: ch.reason, detail: ch.detail, rejectedAt: IB.kst() }); } catch (_) {} continue; }
+    if (!IB.channelAllowed(ch.preset.name, AUTO.allow)) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: IB.REASON.notPilot, detail: `채널 「${ch.preset.name}」 — 받을 채널: ${AUTO.allow.join(' · ')}`, rejectedAt: IB.kst() }); } catch (_) {} continue; }
+    if (uploaded.has((_safeFolder(path.basename(sp).replace(/\.md$/i, '')) + '.mp4').toLowerCase())) {   // 이미 올렸다 = 끝난 편
+      try { IB.finishNote(n.file, IB.SUB.done, { doneAt: IB.kst(), result: '성공', upload: 'done', note: '앱을 다시 켠 뒤 업로드 기록으로 확인' }); } catch (_) {}
+      continue;
+    }
+    list.push({ note: n.file, scriptPath: sp, channel: ch.preset.name, preset: ch.preset, key });
+  }
+  if (!list.length) return;
+  log(`📥 지난번에 받아 두고 끝내지 못한 편 ${list.length}편을 다시 큐에 넣습니다 — ${list.map((b) => b.key).join(' · ')}`);
+  await _inboxOpen(list);
+}
+// 새 쪽지 → 확인 → 진행중으로 옮기고 큐에 넣기(오래된 것부터)
+async function _inboxTake(notes) {
+  const IB = require('./core/inbox');
+  const chans = _inboxChannels(), uploaded = _uploadedNames(), byName = new Map(chans.map((p) => [p.name, p]));
+  const taken = new Set(), list = [];
+  const TS = require('./core/today-scripts'), tRoot = (process.env.PM_UI_SMOKE && process.env.PM_INBOX_THUMBS) || thumbRoot();   // 🧪 시험만 임시 썸네일 폴더
+  const deps = {
+    channels: chans, allow: AUTO.allow,
+    inQueue: (sp) => taken.has(_ibKey(sp)) || S.modes.longform.items.some((x) => _ibKey(x.scriptPath) === _ibKey(sp)),
+    isMade: (sp, p) => _scriptMade(sp, byName.get(p.name) || p, uploaded),
+    packStatus: (sp) => TS.packagingStatus(sp, { thumbRoot: tRoot }),
+  };
+  for (const n of notes) {
+    const r = IB.readNote(n.file);
+    if (!r.ok) { if (r.young) continue; _inboxReject(n.file, r.reason, r.detail, r.text); continue; }
+    const c = IB.checkNote(r.note, deps);
+    if (!c.ok) { _inboxReject(n.file, c.reason, c.detail); continue; }
+    let doing;
+    try { doing = IB.moveNote(n.file, IB.SUB.doing, { priming: { acceptedAt: IB.kst(), channel: c.preset.name, version: 'v' + appDiskVersion() } }); }
+    catch (e) { log(`📥 쪽지를 옮기지 못했습니다(${n.name}): ${e.message} — 다음에 다시 봅니다`); continue; }
+    taken.add(_ibKey(r.note.script));
+    list.push({ note: doing, scriptPath: r.note.script, channel: c.preset.name, preset: c.preset, key: c.key });
+    log(`📥 받음 — ${c.key} · 채널 「${c.preset.name}」 · ${path.basename(r.note.script)}`);
+  }
+  if (list.length) await _inboxOpen(list);
+}
+// 자동으로 만들 계획 = 받은 편 중 아직 안 끝난 것(실패·🟥 로 뺀 편 제외) · 큐 순서
+function _inboxPlan() {
+  return S.modes.longform.items
+    .filter((it) => it.inbox && AUTO.items.has(_ibKey(it.scriptPath)) && !it.inboxOut && !(it.status === 'done' && it.run && it.run.completed))
+    .map((it) => ({ mode: 'longform', id: it.id, settings: it.settings || null }));
+}
+// 🟥 미확인 경험 편은 묻지 않고 뺀다(큐에는 남긴다 — 로이가 확인한 뒤 ⚡ 로 직접) · 쪽지는 거절(사유)로
+function _inboxGate(plan) {
+  if (!plan.length) return plan;
+  const blocked = _batchPreflight(plan, S.modes.longform.items, royOpenInfo);
+  if (!blocked.length) return plan;
+  const IB = require('./core/inbox');
+  for (const b of blocked) {
+    const it = S.modes.longform.items.find((x) => x.id === b.id);
+    const rec = it && AUTO.items.get(_ibKey(it.scriptPath));
+    if (!it || !rec) continue;
+    it.inboxOut = b.reason;
+    try { IB.finishNote(rec.note, IB.SUB.reject, { reason: IB.REASON.roy, detail: `${b.reason} — 큐에 남겨 둠(대본 보기에서 확인한 뒤 ⚡ 만들기로 직접)`, rejectedAt: IB.kst() }); } catch (_) {}
+    AUTO.items.delete(_ibKey(it.scriptPath));
+    _inboxFinished(rec, '건너뜀', b.reason);
+    log(`📥 자동 제작에서 뺌 — ${rec.key} : ${b.reason} (큐에는 남겨 둡니다)`);
+  }
+  const bad = new Set(blocked.map((b) => b.id));
+  return plan.filter((e) => !bad.has(e.id));
+}
+// 한 편이 끝났을 때(runMakeAllCore 성공 · 자동 run-batch 실패/중단)
+function _inboxItemEnd(it, result, msg = '') {
+  if (!AUTO.on || !it || !it.inbox) return;
+  const k = _ibKey(it.scriptPath), rec = AUTO.items.get(k);
+  if (!rec) return;
+  const IB = require('./core/inbox');
+  if (result === 'ok') {
+    AUTO.failStreak = 0; rec.made = IB.kst();
+    const up = it.upload && it.upload.state;
+    if (up === 'queued' || up === 'uploading') { log(`📥 ${rec.key} 제작 끝 — 업로드가 끝나면 쪽지를 처리됨으로 옮깁니다`); _inboxProgress(true); return; }
+    _inboxDone(it, rec);
+  } else if (result === 'failed') {
+    AUTO.failStreak++;
+    it.inboxOut = '제작 실패';
+    try { IB.finishNote(rec.note, IB.SUB.reject, { reason: IB.REASON.fail, detail: String(msg || '').slice(0, 500), rejectedAt: IB.kst() }); } catch (_) {}
+    AUTO.items.delete(k);
+    AUTO.lastReject = { name: path.basename(rec.note), reason: IB.REASON.fail, detail: String(msg || '').slice(0, 200), at: IB.kst() };
+    _inboxFinished(rec, '실패', msg);
+    _inboxProgress(true);
+  }
+  // aborted = 쪽지는 진행중에 그대로(다음에 이어 간다)
+}
+function _inboxDone(it, rec) {
+  const IB = require('./core/inbox');
+  const up = it.upload || null;
+  try { IB.finishNote(rec.note, IB.SUB.done, { doneAt: IB.kst(), result: '성공', channel: rec.channel, upload: up ? up.state : '없음(채널 자동 업로드 꺼짐)', url: (up && up.url) || '', uploadError: (up && up.error) || '' }); } catch (e) { log(`📥 쪽지를 처리됨으로 옮기지 못했습니다: ${e.message}`); }
+  AUTO.items.delete(_ibKey(it.scriptPath));
+  _inboxFinished(rec, '성공', up && up.state === 'failed' ? '업로드 실패: ' + (up.error || '') : '');
+  log(`📥 ${rec.key} 끝 — 쪽지를 처리됨으로 옮겼습니다${up ? ` (업로드 ${up.state})` : ''}`);
+  _inboxProgress(true); _inboxEmit('state');
+}
+function _inboxOnUpload(it) {
+  if (!AUTO.on || !it || !it.inbox || !it.upload) return;
+  const rec = AUTO.items.get(_ibKey(it.scriptPath));
+  if (!rec) return;
+  if (rec.made && (it.upload.state === 'done' || it.upload.state === 'failed')) _inboxDone(it, rec);
+  else _inboxProgress(true);
+}
+// 큐가 노는가 — 작업 줄이 비고 · 화면이 자기 큐 루프를 돌리지 않고 · ⚡ 를 누르고 줄 서는 중이 아니고 · 보이스디자인 중이 아님
+function _inboxIdle() {
+  if (AUTO.running || AUTO.uiBusy || _pendingMake || gpuBusyReason()) return false;
+  return Object.values(_lanePending).every((n) => !n);
+}
+async function _inboxRunBatch() {
+  const plan = _inboxGate(_inboxPlan());
+  if (!plan.length) return;
+  AUTO.running = true; AUTO.batches++;
+  AUTO.failStreak = 0;
+  log(`📥 자동 제작 시작 — 받은 편 ${plan.length}편 (대본마다 그 채널 설정값 · 머리의 ⏸ 이번 편까지만·■ 중단은 그대로 이긴다)`);
+  _inboxEmit('batch', { running: true, n: plan.length });
+  _inboxProgress(true);
+  const dry = !!(process.env.PM_UI_SMOKE && process.env.PM_INBOX_DRY);   // 🧪 시험 = 무음·음성만
+  let r = null, err = '';
+  try {
+    r = await WORLD.run('longform', () => _runBatch({   // 롱폼 세계에서(로이가 출판 화면을 보고 있어도 큐 제작은 롱폼 칸을 읽게)
+      plan, common: { auto: true, ...(dry ? { dry: true, outMode: 'audio' } : {}) }, openEach: false,
+      extend: (have) => { if (AUTO.paused || AUTO.hold) return []; const more = _inboxGate(_inboxPlan().filter((e) => !have.some((h) => h.id === e.id))); AUTO.extended += more.length; return more; },
+    }));
+  } catch (e) { err = e.message; log('📥 자동 제작 오류: ' + e.message); }
+  finally {
+    AUTO.running = false;
+    if (r && r.aborted) AUTO.hold = '■ 중단';
+    else if (r && r.stoppedEarly) AUTO.hold = '⏸ 이번 편까지만';
+    else if (AUTO.failStreak >= 2) AUTO.hold = `연속 실패 ${AUTO.failStreak}편`;
+    if (AUTO.hold) log(`📥 자동 제작 보류 — ${AUTO.hold}. 머리의 「▶ 자동 이어 가기」를 누르거나 앱을 다시 켜면 남은 편을 이어 갑니다`);
+    else log(`📥 자동 제작 끝${r ? ` — 실패 ${r.failed || 0}` : ''}${err ? ' · ' + err : ''}`);
+    _inboxEmit('batch', { running: false, aborted: !!(r && r.aborted), failed: (r && r.failed) || 0, stoppedEarly: !!(r && r.stoppedEarly), error: err, queue: queueDTO() });
+    _inboxProgress(true);
+  }
+}
+async function _inboxTick() {
+  if (!AUTO.on || AUTO.ticking) return;
+  AUTO.ticking = true;
+  try {
+    if (!AUTO.uiLoaded) return;                      // 첫 화면이 뜬 뒤에
+    if (!licOk()) { _inboxProgress(); return; }      // 🔐 로그인 전 — 쪽지는 그대로(로그인하면 이어 간다)
+    const IB = require('./core/inbox');
+    try { const st = IB.loadState(); if (JSON.stringify(st.allowChannels) !== JSON.stringify(AUTO.allow)) { AUTO.allow = st.allowChannels; log(`📥 받을 채널: ${AUTO.allow.includes('*') ? '전 채널' : AUTO.allow.join(' · ')}`); _inboxEmit('state'); } } catch (_) {}
+    await WORLD.run('longform', async () => {
+      if (!AUTO.paused && !AUTO.resumed) { AUTO.resumed = true; await _inboxResumeDoing(); }
+      const notes = IB.listNotes();
+      AUTO.waiting = AUTO.paused ? notes.length : 0;
+      if (!AUTO.paused && notes.length) await _inboxTake(notes);
+    });
+    if (!AUTO.paused && !AUTO.hold && !AUTO.running && _inboxPlan().length && _inboxIdle()) {
+      if (++AUTO.idleTicks >= 2) { AUTO.idleTicks = 0; _inboxRunBatch(); }   // 두 번 연속(≈5초) 놀 때 — 화면 단계 버튼 사이 틈에 끼어들지 않게
+    } else AUTO.idleTicks = 0;
+    _inboxProgress();
+  } catch (e) { log('📥 받은 편지함 처리 중 문제: ' + e.message); }
+  finally { AUTO.ticking = false; }
+}
+// ⑤ progress.json — 단계·편이 바뀌면 바로, 그 밖엔 5초에 한 번까지(같으면 1분에 한 번 살아 있음 표시)
+function _inboxOnMake(snap) {
+  if (!AUTO.on || !snap) return;
+  if (snap.phase !== 'running') { if (AUTO.cur && AUTO.cur.op === snap.operationId) AUTO.cur = null; _inboxProgress(true); return; }
+  const it = snap.itemId ? findQueueItem(snap.itemId) : null;
+  const rec = it ? AUTO.items.get(_ibKey(it.scriptPath)) : null;
+  const IB = require('./core/inbox');
+  const sg = IB.stageOf(snap);
+  AUTO.cur = { op: snap.operationId, key: rec ? rec.key : (it ? require('./core/inbox').noteKey({ script: it.scriptPath || '' }) : ''), title: snap.title || '', auto: !!rec, stage: sg.stage, done: sg.done, total: sg.total, startedAt: snap.startedAt ? IB.kst(snap.startedAt) : '', queue: snap.queue || null };
+  _inboxProgress();
+}
+function _inboxProgress(force = false) {
+  if (!AUTO.on) return;
+  try {
+    const IB = require('./core/inbox');
+    const items = S.modes.longform.items;
+    const queued = items.filter((it) => it.inbox && AUTO.items.has(_ibKey(it.scriptPath))).map((it) => {
+      const rec = AUTO.items.get(_ibKey(it.scriptPath));
+      return { key: rec.key, channel: rec.channel, status: it.status || 'idle', made: !!rec.made, upload: (it.upload && it.upload.state) || '' };
+    });
+    const doc = {
+      app: 'v' + appDiskVersion(),
+      auto: { on: true, paused: AUTO.paused, hold: AUTO.hold, running: AUTO.running, login: licOk(), allowChannels: AUTO.allow.slice() },
+      current: AUTO.cur ? { key: AUTO.cur.key, title: AUTO.cur.title, auto: AUTO.cur.auto, stage: AUTO.cur.stage, done: AUTO.cur.done, total: AUTO.cur.total, startedAt: AUTO.cur.startedAt, queuePos: AUTO.cur.queue } : null,
+      queued, waiting: AUTO.waiting, finished: AUTO.finished.slice(-50), lastReject: AUTO.lastReject,
+    };
+    const s = JSON.stringify(doc), now = Date.now();
+    const sig = JSON.stringify([doc.current && doc.current.key, doc.current && doc.current.stage, doc.auto, queued.length, AUTO.finished.length, AUTO.waiting]);
+    const due = force || sig !== AUTO.prog.sig || (s !== AUTO.prog.s && now - AUTO.prog.at >= 5000) || now - AUTO.prog.at >= 60000;
+    if (!due) return;
+    AUTO.prog = { at: now, s, sig };
+    IB.writeProgress(doc);
+  } catch (_) {}
+}
+function _inboxStart() {
+  if (!_inboxOn() || AUTO.on) return;
+  AUTO.on = true;
+  try { const st = require('./core/inbox').loadState(); AUTO.paused = st.paused; AUTO.allow = st.allowChannels; } catch (_) {}
+  const IB = require('./core/inbox');
+  try { fs.mkdirSync(IB.inboxDir(), { recursive: true }); } catch (_) {}
+  const wc = win && win.webContents;
+  if (wc) {
+    wc.on('did-start-loading', () => { AUTO.uiBusy = false; });   // 화면이 다시 뜨면 「화면 큐 루프 중」 표시는 남지 않는다
+    wc.on('did-finish-load', () => { AUTO.uiLoaded = true; setTimeout(_inboxTick, 1500); });
+    if (!wc.isLoading()) AUTO.uiLoaded = true;
+  }
+  AUTO.timer = setInterval(_inboxTick, 5000);
+  log(`📥 받은 편지함 — ${IB.inboxDir()}${AUTO.paused ? ' · ⏸ 자동 제작 멈춤 상태(머리 단추로 풀기)' : ' · 쪽지가 오면 큐에 넣고 바로 만듭니다'} · 받을 채널: ${AUTO.allow.includes('*') ? '전 채널' : AUTO.allow.join(' · ')}${process.argv.includes('--inbox') ? ' · 밖에서 켬(--inbox)' : ''}`);
+  _inboxProgress(true);
+}
+// 🪟 한 번만 켜진다(bootstrap 의 단일 실행 잠금) — 두 번째 실행: --inbox 면 받은 편지함만 바로 보고(창을 빼앗지 않는다) · 아니면 창을 앞으로
+function _onSecondInstance(argv) {
+  global.__pmSecondN = (global.__pmSecondN || 0) + 1;   // 🧪 시험이 센다
+  const inbox = Array.isArray(argv) && argv.includes('--inbox');
+  logToFile(`🪟 Priming 을 한 번 더 실행 — ${inbox ? '--inbox: 받은 편지함을 바로 봅니다' : '켜진 창을 앞으로 가져옵니다'}`);
+  if (inbox) { if (AUTO.on) setTimeout(_inboxTick, 200); return; }
+  try { if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } catch (_) {}
+}
+ipcMain.handle('inbox-state', () => _inboxState());
+ipcMain.handle('inbox-pause', (_e, args = {}) => {
+  const on = !!(args && args.paused);
+  AUTO.paused = on;
+  try { require('./core/inbox').saveState({ paused: on }); } catch (e) { log('📥 멈춤 상태 저장 실패: ' + e.message); }
+  if (!on) { AUTO.hold = ''; AUTO.failStreak = 0; }
+  log(on ? '📥 ⏸ 자동 제작 멈춤 — 받은 쪽지는 큐에 넣지 않고 쌓아 둡니다(지금 만드는 편은 그대로 · 멈추려면 ■ 중단/⏸ 이번 편까지만)' : '📥 ▶ 자동 제작 풀기 — 쌓인 쪽지를 오래된 것부터 이어 갑니다');
+  _inboxEmit('state'); _inboxProgress(true);
+  if (!on) setTimeout(_inboxTick, 300);
+  return _inboxState();
+});
+ipcMain.handle('inbox-resume', () => {
+  AUTO.hold = ''; AUTO.failStreak = 0;
+  log('📥 ▶ 자동 이어 가기 — 남은 받은 편을 이어 만듭니다');
+  _inboxEmit('state'); _inboxProgress(true);
+  setTimeout(_inboxTick, 300);
+  return _inboxState();
+});
+// 화면이 자기 큐 루프(단계 버튼 runStageQueue · ⚡ 만들기 준비)를 돌리는 동안 — 자동 제작이 그 틈에 끼어들지 않게
+ipcMain.handle('ui-busy', (_e, on) => { AUTO.uiBusy = !!on; return true; });
 
 // 출력 경로 = <채널 outputFolder>/<대본파일명(확장자 제외)>/
 //   그 안에 media/(이미지+영상) · tts/(음성) · subtitles/(SRT) 하위폴더 + <대본명>.vrew.
@@ -3345,6 +3652,7 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
 //   finish = { scriptPath, preset } — 업로드를 줄 세운 순간의 대본·채널(제작 중 화면이 다른 대본으로 바뀌어도 섞이지 않게 · runCtx 와 같은 이유).
 //   업로드 줄(ytChain)에서 돈다 · 어떤 경우에도 던지지 않는다(업로드 성공을 뒤집지 않는다).
 function ytFinishJob(ctx, preset) { return { scriptPath: ctx && ctx.scriptPath, preset: preset || null }; }
+const THUMB_RETRY_MAX = 4, THUMB_RETRY_MIN = 30;   // 🖼 썸네일 A 다시 찾기(⑥) — 30분 간격 4번(앱을 끄면 남은 다시 찾기는 없어진다)
 async function runYtFinish({ channelId, videoId, title, finish }) {
   const YT = require('./core/youtube-upload');
   const YF = require('./core/yt-finish');
@@ -3361,6 +3669,12 @@ async function runYtFinish({ channelId, videoId, title, finish }) {
     const token = async (force) => { const t = await YT.accessToken(channelId, { force }); if (!t.ok) throw new Error(t.error); return t.token; };
     const res = await YF.finishVideo({ channelId, videoId, plan, token, log });
     for (const l of YF.reportLines(title, res)) log(l);
+    // 🖼 썸네일 A 가 아직 없으면(지워졌거나 이름이 바뀜) 마무리만 30분 뒤 다시(4번까지 · 안전장치 · 1.0 자동 넘김 ⑥) — 패키징이 있는 대본만(썸네일이 있어야 할 편)
+    const tries = Number(finish.thumbRetry) || 0;
+    if (!plan.thumbA && pf && key && root && tries < THUMB_RETRY_MAX) {
+      log(`⚠ 「${title}」 썸네일 A 를 아직 못 찾았습니다 — ${THUMB_RETRY_MIN}분 뒤 다시 찾아 넣습니다 (${tries + 1}/${THUMB_RETRY_MAX})`);
+      setTimeout(() => { try { enqueueYtUpload({ finishOnly: true, channelId, videoId, title, finish: { ...finish, thumbRetry: tries + 1 } }); } catch (_) {} }, THUMB_RETRY_MIN * 60 * 1000);
+    } else if (!plan.thumbA && tries >= THUMB_RETRY_MAX) log(`⚠ 「${title}」 썸네일 A 를 ${THUMB_RETRY_MAX}번 다시 찾았지만 없습니다 — Studio 에서 직접 넣으세요: https://studio.youtube.com/video/${videoId}/edit`);
     return res;
   } catch (e) {
     log(`⚠ 업로드 마무리 못 함 — 「${title}」: ${e.message} (Studio 에서 직접 하세요: https://studio.youtube.com/video/${videoId}/edit)`);
@@ -4621,6 +4935,7 @@ function setItemUpload(itemId, up) {
   const it = itemId ? findQueueItem(itemId) : null;
   if (!it) return;
   it.upload = up; writeWorkspace(); pushQueueUpdate();
+  _inboxOnUpload(it);   // 📥 받은 편 — 업로드가 끝나면(성공·실패) 쪽지를 처리됨으로
 }
 ipcMain.handle('queue-mark', (_e, { id, phase } = {}) => { markItemRun(findQueueItem(id), phase === 'end' ? 'end' : 'start'); return { queue: queueDTO() }; });   // 단계 버튼(runStageQueue)이 대본마다 시작·끝을 알린다
 function queueDTO() {
@@ -5090,6 +5405,7 @@ function warnMissingTts(list) {
   if (!list || !list.length) return;
   const detail = list.map((x) => `• ${x.label}: ${x.n}개 누락 (컷 ${x.head}${x.n > x.headN ? ' …' : ''} / 전체 ${x.total}개)`).join('\n');
   log(`⛔ 음성 누락으로 .vrew 미생성: ${list.length}건`);
+  if (AUTO.running) { log('  📥 자동 제작 중이라 알림 창은 띄우지 않습니다(이 편은 실패로 남습니다)'); return; }
   try {
     dialog.showMessageBox(win, {
       type: 'warning',
@@ -5180,6 +5496,7 @@ function warnIncompleteVisuals(incomplete) {
   if (!incomplete || !incomplete.length) return;
   const detail = incomplete.map((x) => `• ${x.label}: G${x.nums.join(', G')}`).join('\n');
   log(`⛔ 이미지 미생성으로 .vrew 미생성: ${incomplete.length}건`);
+  if (AUTO.running) { log('  📥 자동 제작 중이라 알림 창은 띄우지 않습니다(이 편은 실패로 남습니다)'); return; }
   try {
     dialog.showMessageBox(win, {
       type: 'warning',
@@ -7617,6 +7934,7 @@ function _mkStart(projects, range, title, skip) {
       const live = jobs.filter(j => Object.values(j.stages).some(x => x.state === 'run'));
       const shown = live[0] || jobs[0] || snap;
       if (win && !win.isDestroyed()) win.webContents.send('make-progress', {...shown, jobs: jobs.map(j => ({operationId:j.operationId, title:j.title, phase:j.phase, sent:j.sent, image:j.image, video:j.video}))});
+      _inboxOnMake(shown);   // 📥 progress.json(화면 밖 사본)
     } catch {}
   };
   const timer = setInterval(send, 1000);
@@ -7642,6 +7960,7 @@ async function runMakeAllCore(opts = {}) {
     if (!result || !result.completed) throw new Error('제작이 마무리되지 않았습니다');
     phase = 'done';
     if (it) { it.status = 'done'; it.run.completed = (workClocks.get(it) || 1) === 1; }
+    _inboxItemEnd(it, 'ok');   // 📥 받은 편이면 쪽지를 처리됨으로(업로드가 줄 서 있으면 끝난 뒤) — 로이가 ⚡ 로 직접 만든 경우도
     return result;
   } catch (e) {
     const aborted = S.abort || e.code === 'MAKE_ABORTED';
@@ -8093,13 +8412,26 @@ ipcMain.handle('make-all', (_e, args = {}) => { const _it = activeItem(); return
 //   중단·실패한 항목이 마무리될 때까지 다음 새 대본을 시작하지 않는다.
 //   openEach(기본 true): 대본 완료 때마다 그 .vrew 를 순차적으로 자동 열기(단건과 동일). false 면 열지 않고
 //   탐색기(출력폴더)는 어느 경우에도 자동으로 열지 않는다 — 필요하면 헤더 '출력폴더' 버튼.
-ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(args.plan) && args.plan[0] && args.plan[0].mode === 'longform' ? args.plan[0].id : null, enqueueTtsJob('큐 순차 제작', async () => {
+ipcMain.handle('run-batch', (_e, args = {}) => _runBatch({ plan: args.plan, common: args.common, openEach: args.openEach }));
+// 📥 화면 ⚡ 만들기(IPC)와 받은 편지함 자동 제작(_inboxRunBatch)이 같은 길 — 자동은 common.auto(대본마다 그 채널 설정값 · 묻는 창 없음)
+//   args.extend(plan) → 계획이 끝났을 때 이어 만들 새 항목(만드는 중에 받은 편) · 「이번 편까지만」·중단이면 부르지 않는다
+function _runBatch(args = {}) { return _withMakePending(Array.isArray(args.plan) && args.plan[0] && args.plan[0].mode === 'longform' ? args.plan[0].id : null, enqueueTtsJob(args.common && args.common.auto ? '📥 자동 제작' : '큐 순차 제작', async () => {
   const plan = require('./core/queue-resume').resumePlan(Array.isArray(args.plan) ? args.plan : [], S.modes.longform.items);
   const common = args.common || {};
   const openEach = args.openEach !== false; // 기본값 = 순차 열기
   if (!plan.length) throw new Error('실행할 대본이 큐에 없습니다.');
+  // 📥 자동 제작은 묻지 않는다(요청서 ③) — 막힌 대본(🟥 미확인)은 빼고 진행(_inboxGate 가 이미 걸렀다 · 여기는 한 겹 더)
+  if (common.auto) {
+    const blocked = _batchPreflight(plan, S.modes.longform.items, royOpenInfo);
+    if (blocked.length) {
+      const bad = new Set(blocked.map((b) => b.id));
+      for (let k = plan.length - 1; k >= 0; k--) if (plan[k] && bad.has(plan[k].id)) plan.splice(k, 1);
+      log(`📥 자동 제작 — 막힌 대본 ${blocked.length}편을 묻지 않고 뺍니다: ` + blocked.map((b) => `${b.label} (${b.reason})`).join(' / '));
+      if (!plan.length) return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: false, failed: 0, stoppedEarly: false, remaining: 0 };
+    }
+  }
   // 🛫 사전 점검 — 하나라도 막히면 시작 전에 알린다(dry 는 royGate 도 건너뛰므로 점검도 안 한다)
-  if (!(process.env.PM_UI_SMOKE && common.dry)) {
+  else if (!(process.env.PM_UI_SMOKE && common.dry)) {
     const blocked = _batchPreflight(plan, S.modes.longform.items, royOpenInfo);
     if (blocked.length) {
       log(`🛫 사전 점검 — 만들기 전에 막히는 대본 ${blocked.length}편: ` + blocked.map((b) => `[${b.idx}/${plan.length}] ${b.label} (${b.reason})`).join(' / '));
@@ -8130,7 +8462,13 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
   { const _mix = require('./core/queue-channel').channelMix(plan.map((e) => S.modes.longform.items.find((x) => x.id === e.id)).filter(Boolean), common.presetName);
     if (_mix.mixed) log(`🔀 채널 섞임 — ${_mix.counts.map(([n, k]) => `${n} ${k}편`).join(' · ')} (목소리·스타일·자막·완성 종류는 대본마다 자기 채널 · 이미지·비디오 도구는 헤더)`); }
   let okN = 0, failN = 0, skipN = 0, stoppedLeft = 0;
-  for (let i = 0; i < plan.length; i++) {
+  for (let i = 0; ; i++) {
+    if (i >= plan.length) {   // 📥 계획을 다 돌았으면 — 그동안 받은 편이 있으면 이어서(자동 제작만 extend 를 준다)
+      const more = (typeof args.extend === 'function' && !S.abort && !_stopAfterItem) ? (args.extend(plan) || []) : [];
+      if (!more.length) break;
+      plan.push(...more);
+      log(`📥 만드는 동안 받은 편 ${more.length}편을 이어서 만듭니다 (모두 ${plan.length}편)`);
+    }
     if (S.abort) { log('⏹ 큐 중단됨 — 남은 대본 보존'); break; }
     if (_stopAfterItem) {                    // ⏸ 방금 끝낸 대본까지만 — 다음 대본은 시작하지 않는다
       stoppedLeft = _batchRemaining(plan, i, S.modes.longform.items);
@@ -8160,17 +8498,20 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
       //   헤더에서 고른 도구(예 ComfyUI Krea2)를 큐 전 항목에 적용한다. 헤더값이 없을 때만 항목 저장값 폴백.
       //   (예전엔 항목별 stale 값이 우선이라, 이어받기한 대본이 옛 도구로 되돌아가던 문제 — 로이 결정 2026-07-22.)
       //   🗑 지운 옛 영상 도구는 core/engine-migrate 가 「없음(이미지만)」으로 읽는다 · Flow 도 v0.9.67 에 지웠다 → 「없음」
-      const rawVe = (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'none');
+      // 📥 자동 제작 = 도구·스타일·자막·완성 종류 모두 **그 대본 채널 설정값**(헤더가 없다 — 로이가 헤더에서 그 채널을 고른 것과 같은 값 · core/inbox.autoItemOpts 한 곳)
+      const _auto = common.auto ? require('./core/inbox').autoItemOpts(resolvePreset(s.presetName || null)) : null;
+      const rawVe = _auto ? _auto.videoEngine : (common.videoEngine != null) ? common.videoEngine : (s.videoEngine != null ? s.videoEngine : 'none');
       const _ve0 = rawVe === 'flow' ? 'none' : require('./core/engine-migrate').migrateVideo(rawVe).v;
-      const ie = (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || '');
+      const ie = _auto ? _auto.imgEngine : (common.imgEngine != null) ? common.imgEngine : (s.imgEngine || '');
       // 🔴 채널(목소리)은 **항목값 우선 → 헤더 폴백**. 둘 다 없으면 getPreset(null)=기본 채널이 되어
       //   **엉뚱한 목소리로 조용히 합성**된다(2026-08-31 실사고). 배속·AI고지도 같은 구멍이라 함께 폴백한다.
       const _pn = s.presetName || common.presetName || null;
       if (!s.presetName && common.presetName) log(`  ⓘ 이 대본에 채널이 저장돼 있지 않아 헤더 채널 「${common.presetName}」 을 씁니다`);
       if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
       // 🔀 다른 채널 대본 = 그림 스타일·자막·완성 종류도 그 채널(v0.9.41 · core/queue-channel 한 곳) — 헤더와 같은 채널이면 {}
-      const _ov = require('./core/queue-channel').channelOverrides(_pn ? resolvePreset(_pn) : null, common.presetName);
-      if (Object.keys(_ov).length) log(`  🔀 채널 「${_pn}」 대본 — 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || '(헤더)'} (그 채널 설정)`);
+      const _ov = _auto ? _auto.ov : require('./core/queue-channel').channelOverrides(_pn ? resolvePreset(_pn) : null, common.presetName);
+      if (_auto) log(`  📥 채널 「${_pn}」 설정값 — 이미지 ${ie} · 비디오 ${_ov.videoEngine === 'none' ? 'none' : _ve0} · 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || s.outTarget || 'vrew'}`);
+      else if (Object.keys(_ov).length) log(`  🔀 채널 「${_pn}」 대본 — 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || '(헤더)'} (그 채널 설정)`);
       // 🎬 채널 비디오 「없음」 = 헤더 도구보다 이긴다(끄는 쪽만 · v1.0.14)
       const ve = _ov.videoEngine === 'none' ? 'none' : _ve0;
       if (ve === 'none' && _ve0 !== 'none') log(`  🎬 채널 「${_pn}」 비디오 = 없음 — 이 대본은 영상을 만들지 않습니다(헤더 도구 무시)`);
@@ -8201,6 +8542,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
       const aborted = S.abort || e.code === 'MAKE_ABORTED';
       it.status = aborted ? 'interrupted' : 'failed';
       if (!aborted) failN++;
+      if (common.auto) _inboxItemEnd(it, aborted ? 'aborted' : 'failed', e.message);   // 📥 받은 편의 실패 → 쪽지를 거절로(사유와 함께)
       markItemRun(it, 'end'); pushDtoUpdate();
       log(`${aborted ? '⏹ 중단' : '✗ 실패'}: ${label} — ${e.message} (미완료 작업 우선 — 다음 대본은 시작하지 않음)`);
       break;
@@ -8213,7 +8555,7 @@ ipcMain.handle('run-batch', (_e, args = {}) => _withMakePending(Array.isArray(ar
   log(`⚡⚡ 큐 제작 종료 — 성공 ${okN} · 실패 ${failN}${skipN ? ` · 완료건너뜀 ${skipN}` : ''}${stoppedLeft ? ` · ⏸ 남김 ${stoppedLeft}` : ''}`);
   // ⚠ 큐가 끝나도 탐색기를 열지 않는다(로이 2026-08-12) — .vrew 는 항목마다 열리므로 충분.
   return { dto: S.parsed ? P.toDTO(S.parsed) : null, queue: queueDTO(), aborted: !!S.abort, failed: failN, stoppedEarly: stoppedLeft > 0, remaining: _batchRemaining(plan, 0, S.modes.longform.items) };
-})));
+})); }
 
 // ── 🤖 2.0 무인 제작 — 주문서 한 장 → 결과서 한 장(v1.0.18 · docs/요청서_2.0무인제작_2026-11-04.md ①~⑮) ──────────────
 //   입구 = tools/order.js → bootstrap(--order 등 · PM_HEADLESS) → _headlessMain. 판정·꼴은 core/order-contract 한 곳.
@@ -9124,6 +9466,8 @@ ipcMain.handle('yt-login-open', async () => {
 ipcMain.handle('abort', () => {
   workAbortEpoch++;
   S.abort = true;
+  // 📥 ■ 중단은 자동 제작보다 이긴다 — 받은 편이 남아 있으면 몇 초 뒤 저절로 다시 시작하지 않게 이번 실행 동안 보류(머리 「▶ 자동 이어 가기」로 푼다)
+  try { if (AUTO.on && !AUTO.hold && (AUTO.running || _inboxPlan().length)) { AUTO.hold = '■ 중단'; log('📥 ■ 중단 — 받은 편 자동 제작도 보류합니다(머리의 「▶ 자동 이어 가기」로 이어 갑니다)'); _inboxEmit('state'); _inboxProgress(true); } } catch (_) {}
   if (_awake.n - _dlActive <= 0) _dlAbort = true;   // 받기·전사만 돌고 있을 때는 헤더 ■ 이 그것도 멈춘다(제작이 같이 돌면 제작만)
   // Flow 엔진은 자체 _stopped 플래그로 멈춤 — abort 시 명시적으로 stop() 호출
   // 중단 즉시 '생성 중' 스피너 고착 해제 — 만들다 만 그룹 카드가 계속 스피너를 돌리지 않게.

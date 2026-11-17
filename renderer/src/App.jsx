@@ -814,6 +814,10 @@ export default function App() {
   const queueStopAfterRef = useRef(false);
   const [queueBusy, setQueueBusy] = useState(false);
   const [stopAfter, setStopAfter] = useState(false);
+  // 📥 받은 편지함 = 1.0 자동 넘김(v1.0.57) — main 이 받은 편을 큐에 넣고 큐가 놀면 바로 만든다(켜는 스위치 없음). 화면은 「⏸ 자동 제작 멈춤」 단추 하나와 상태 표시만.
+  //   inboxSt = { on, paused, hold, running, waiting, pending, lastReject } · 판매판은 null(단추 없음)
+  const [inboxSt, setInboxSt] = useState(null);
+  const inboxEvtRef = useRef(null);
   const [logText, setLogText] = useState('');
 
   // 모달/플레이어 상태
@@ -1126,6 +1130,8 @@ export default function App() {
     if (api.onYtProgress) api.onYtProgress((d) => { if (d) setYtProg(d); });
     api.onDtoUpdate((d) => { if (d) { setDto(d); if (d.timings) setTimings(d.timings); if (d.queue) setQueue(d.queue); } });
     if (api.onQueueUpdate) api.onQueueUpdate((q) => { if (q) setQueue(q); });   // 📋 작업 순서 줄(보지 않는 대본 상태 포함)
+    if (api.onInboxEvent) api.onInboxEvent((d) => { if (d && inboxEvtRef.current) inboxEvtRef.current(d); });   // 📥 받은 편지함(최신 처리기는 ref 로 — 이 효과는 한 번만 돈다)
+    if (api.inboxState) api.inboxState().then((st) => { if (st && !st.missing && st.on) setInboxSt(st); }).catch(() => {});
     if (api.onScriptReloaded) api.onScriptReloaded(() => setReloadTick((t) => t + 1));   // 📄 대본 보기가 새로 그리게
     api.onAutosaved((info) => setAutoSavedAt((info && info.at) || Date.now()));
     api.getAppVersion().then((v) => { if (v) setAppVersion(v); }).catch(() => {});
@@ -1393,6 +1399,32 @@ export default function App() {
     return selectQueueItem(id);
   }
   function followNow() { setFollowOff(false); followRef.current.lastSel = null; followRef.current.lastUser = 0; }
+  // 📥 main 이 보내는 받은 편지함 소식 — opened(큐에 넣음) · batch(자동 제작 시작/끝) · state(멈춤·보류 바뀜)
+  inboxEvtRef.current = (d) => {
+    if (d.state && d.state.on) setInboxSt(d.state);
+    if (d.type === 'opened') {
+      if (d.queue) setQueue(d.queue);
+      if (d.selectId && modeRef.current === 'longform') selectQueueItem(d.selectId);   // 큐가 비어 있었을 때만 — 보던 대본은 그대로 둔다
+      setStatus(`📥 받은 편 ${d.n || 0}편을 큐에 넣었습니다`);
+    } else if (d.type === 'batch') {
+      if (d.running) {
+        queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(true);   // ⏸ 이번 편까지만 단추가 자동 제작에도 그대로 듣는다
+        setStatus(`📥 자동 제작 중 — 받은 편 ${d.n}편 (대본마다 그 채널 설정값)`);
+      } else {
+        queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false);
+        if (d.queue) setQueue(d.queue);
+        api.selectQueueItem(null, 'longform').then((r) => { if (r && r.dto && modeRef.current === 'longform') { setDto(r.dto); if (r.queue) setQueue(r.queue); } }).catch(() => {});   // 지금 보는 대본을 새로 받는다(화면은 옮기지 않는다)
+        setStatus(d.aborted ? '📥 자동 제작 중단됨 — 「▶ 자동 이어 가기」로 남은 편을 이어 갑니다' : d.stoppedEarly ? '📥 이번 편까지 만들고 멈춤 — 「▶ 자동 이어 가기」로 이어 갑니다' : d.failed ? `📥 자동 제작 — 실패 ${d.failed}편(로그를 보세요)` : '📥 자동 제작 끝');
+      }
+    }
+  };
+  // ⏸/▶ 단추 하나 — 보류(■ 중단·⏸ 이번 편까지만·연속 실패) 중이면 이어 가기 · 멈춤이면 풀기 · 아니면 멈춤
+  async function toggleInbox() {
+    try {
+      const st = inboxSt && inboxSt.hold && !inboxSt.paused ? await api.inboxResume() : await api.inboxPause(!(inboxSt && inboxSt.paused));
+      if (st) setInboxSt(st);
+    } catch (e) { logline('자동 제작 단추 오류: ' + e.message); }
+  }
   async function selectQueueItem(id) {
     // 👆 누른 칩을 먼저 「선택됨」으로(v0.9.28) — 큰 대본은 화면을 다시 그리는 데 1초 안팎 걸려, 그동안 눌렸는지 모르고 또 누르게 된다
     setQueue((q) => (q && q[mode] ? { ...q, [mode]: { ...q[mode], activeId: id, items: q[mode].items.map((x) => ({ ...x, active: x.id === id })) } } : q));
@@ -1662,6 +1694,7 @@ export default function App() {
     const qStyle = styleId || null; const qFb = {};
     if (stage !== 'tts' && qStyle === SCRIPT_STYLE_ID && !scriptStyleHit()) { const fb = await runStyleId(); if (fb === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; } qFb.styleFallback = fb; }
     queueAbortRef.current = false;                      // 새 큐 시작 — 지난 중단 기록 초기화
+    try { if (api.uiBusy) api.uiBusy(true); } catch (_) {}   // 📥 대본 사이 틈에 자동 제작이 끼어들지 않게(끝에서 푼다)
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(items.length > 1);   // ⏸ 지난 예약 초기화 · 대본이 둘 이상일 때만 버튼을 보인다
     let stoppedAfter = 0;                                // ⏸ 「이번 편까지만」으로 멈추며 남긴 편수
     stageLoop: for (const ph of phases) {
@@ -1689,6 +1722,7 @@ export default function App() {
     setStageRun(null);
     try { const r = await api.selectQueueItem(null, 'longform'); if (r && r.dto) { setDto(r.dto); if (r.queue) setQueue(r.queue); } } catch (_) {} // 🎬 지금 보는 대본을 새로 받는다(화면을 옮기지 않는다 — 없는 id = 그대로)
     queueStopAfterRef.current = false; setStopAfter(false); setQueueBusy(false);
+    try { if (api.uiBusy) api.uiBusy(false); } catch (_) {}
     setStatus(queueAbortRef.current ? `⏹ 큐 ${label} 중단됨` : stoppedAfter ? `⏸ 큐 ${label} — 이번 편까지 만들고 멈춤 (남은 ${stoppedAfter}편)` : `⚡ 큐 ${label} 완료`);
   }
   // 대본 위 통합 버튼 — 그 대본만: 이미지 전부 → 비디오.
@@ -1755,12 +1789,15 @@ export default function App() {
   }
   // ⚡ 만들기(통합) — 큐 대본이 1개면 그것만(.vrew 자동열기 등 기존 동작), 여러 개면 큐 전체 순차 제작.
   async function runMakeOrBatch() {
-    try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
-    const L = (queue && queue.longform && queue.longform.items) || [];
-    const total = L.length;
-    if (total === 0) { setStatus('대본을 먼저 여세요'); return; }
-    if (total === 1) return runMake(null);  // 단일 대본 → makeAll(.vrew·폴더 자동열기)
-    return runBatchAll();                    // 여러 대본 → 큐 전체 순차
+    try { if (api.uiBusy) await api.uiBusy(true); } catch (_) {}   // 📥 누르고 준비하는 동안(스타일 묻기 등) 자동 제작이 끼어들지 않게
+    try {
+      try { await api.setQueueSettings(currentSettings(), true, 'longform'); } catch (_) {} // 현재 헤더값을 활성 항목에 반영(채널은 열 때 값 유지)
+      const L = (queue && queue.longform && queue.longform.items) || [];
+      const total = L.length;
+      if (total === 0) { setStatus('대본을 먼저 여세요'); return; }
+      if (total === 1) return await runMake(null);  // 단일 대본 → makeAll(.vrew·폴더 자동열기)
+      return await runBatchAll();                    // 여러 대본 → 큐 전체 순차
+    } finally { try { if (api.uiBusy) api.uiBusy(false); } catch (_) {} }
   }
   // ⚡⚡ 큐 전체 순차 제작 — 각 대본은 자기 설정으로.
   async function runBatchAll() {
@@ -7253,6 +7290,21 @@ export default function App() {
                 onClick={toggleStopAfter}>{stopAfter ? <>⏸ 예약됨<span className="sa-long"> · 취소</span></> : <>⏸ 이번 편<span className="sa-long">까지</span>만</>}</button>
             )}
             <button className="ghost stop" title="진행 중인 작업 중단" onClick={abort}>■ 중단</button>
+            {inboxSt && inboxSt.on && (() => {   // 📥 자동 제작(받은 편지함) — 켜는 스위치 없음 · 멈춤 단추 하나(v1.0.57)
+              const held = inboxSt.hold && !inboxSt.paused;
+              const wait = (inboxSt.waiting || 0) + (inboxSt.pending || 0);
+              const lr = inboxSt.lastReject;
+              const tip = (inboxSt.paused ? `자동 제작 멈춤 — 받은 쪽지를 큐에 넣지 않고 쌓아 둡니다${inboxSt.waiting ? `(쌓인 쪽지 ${inboxSt.waiting}개)` : ''}. 누르면 풀고 오래된 것부터 이어 갑니다.`
+                : held ? `자동 제작 보류(${inboxSt.hold}) — 이번 실행 동안 자동 시작을 멈췄습니다. 누르면 남은 받은 편을 이어 만듭니다.`
+                : `자동 제작 — 채널사업부가 대본·패키징·썸네일을 마친 편을 받으면 큐에 넣고, 큐가 놀면 그 채널 설정값으로 바로 만듭니다${inboxSt.running ? '(지금 만드는 중)' : ''}. 누르면 멈춥니다(지금 만드는 편은 ■ 중단·⏸ 이번 편까지만으로).`)
+                + (inboxSt.allow ? `\n받을 채널: ${inboxSt.allow.includes('*') ? '전 채널' : inboxSt.allow.join(' · ')}` : '')
+                + (lr ? `\n마지막으로 받지 않은 쪽지: ${lr.name} — ${lr.reason}${lr.detail ? ' (' + lr.detail + ')' : ''}` : '');
+              return (
+                <button className={'ghost auto-make' + (inboxSt.paused ? ' paused' : held ? ' held' : inboxSt.running ? ' running' : '')} data-testid="auto-make-btn" title={tip} onClick={toggleInbox}>
+                  {inboxSt.paused ? <>▶<span className="lbl"> 자동 풀기</span></> : held ? <>▶<span className="lbl"> 자동 이어 가기</span></> : <>⏸<span className="lbl"> 자동 멈춤</span></>}{wait ? <span className="am-n">{wait}</span> : null}
+                </button>
+              );
+            })()}
           </>)}
         </div>
         {!noProduction && (

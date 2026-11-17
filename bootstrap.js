@@ -64,6 +64,24 @@ try {
   if (process.env.PM_UI_SMOKE) { app.commandLine.appendSwitch('use-fake-device-for-media-stream'); app.commandLine.appendSwitch('use-fake-ui-for-media-stream'); }
 } catch (_) {}
 
+// 🪟 한 번만 켜진다(v1.0.57 · 1.0 자동 넘김 ④) — 두 번째 실행은 업데이트도 하지 않고 바로 끝내고, 명령줄을 켜진 앱에 넘긴다
+//   (--inbox = 받은 편지함을 바로 보라 · 그 밖 = 창을 앞으로). 잠금은 Electron 저장 공간(userData) 기준 — 위에서 정한 뒤에 잡는다
+//   → 무인 실행(electron-order)·E2E(임시 폴더)·판매판 미리보기(다른 홈)는 로이 앱과 서로 막지 않는다.
+//   🧪 E2E 는 잠그지 않는다(PM_SINGLE_TEST=1 일 때만 — 잠금 시험).
+if (!HEADLESS && (!process.env.PM_UI_SMOKE || process.env.PM_SINGLE_TEST === '1')) {
+  let got = true;
+  try { got = app.requestSingleInstanceLock({ argv: process.argv.slice(1) }); } catch (_) { got = true; }
+  if (!got) {
+    try { process.stdout.write('[priming] 이미 켜져 있습니다 — 명령줄을 켜진 앱에 넘기고 끝냅니다\n'); } catch (_) {}
+    app.exit(0);
+    return;
+  }
+  app.on('second-instance', (_e, argv) => {
+    if (typeof global.__pmOnSecond === 'function') global.__pmOnSecond(argv);
+    else (global.__pmSecond = global.__pmSecond || []).push(argv);
+  });
+}
+
 // 라이트 자동 업데이트 — main.js 를 로드하기 "전에" 변경된 파일만 받아 교체.
 //   → 이번 실행이 곧바로 최신 코드로 동작 (팝업·NSIS 인스톨·재시작 단계 없음).
 //   오프라인/실패면 조용히 현재 버전으로 진행. dev(npm start)에선 자동 건너뜀.
