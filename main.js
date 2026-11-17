@@ -11636,21 +11636,53 @@ ipcMain.handle('clip-voice-overwrite', async (_e, args = {}) => {
     storeActive(); syncSnapshotNow();
     return { ok: true, cleared: n, dto: P.toDTO(S.parsed) };
   }
-  if (sents.length !== 1) return { ok: false, error: '음성 덮어쓰기는 클립 하나씩 합니다(녹음 한 개 = 문장 한 개)', dto: P.toDTO(S.parsed) };
-  const s = sents[0];
-  let src = args.path;
-  if (!src) {
-    const r = await dialog.showOpenDialog(win, { properties: ['openFile'], filters: [{ name: '녹음 파일', extensions: require('./core/phone-recv').AUDIO_EXT.filter((x) => x !== 'qta') }] });
-    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true, dto: P.toDTO(S.parsed) };
-    src = r.filePaths[0];
+  // 여러 문장(v1.0.54 · 로이 「6·7번을 고르면 작동 안 한다」) — 대본 순서로 · 파일 수 = 문장 수면 이름 순서대로 하나씩 · 파일 하나면 쉼 자리에서 나눈다
+  const order = new Map(_phoneFlat(pr).map((x, i) => [x.s, i]));
+  sents.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  let srcs = Array.isArray(args.paths) ? args.paths.slice() : (args.path ? [args.path] : null);
+  if (!srcs) {
+    const r = await dialog.showOpenDialog(win, { title: sents.length > 1 ? `녹음 파일 — 고른 클립 ${sents.length}개(파일 ${sents.length}개 = 이름 순서대로 · 파일 1개 = 쉼 자리에서 나눔)` : '녹음 파일', properties: sents.length > 1 ? ['openFile', 'multiSelections'] : ['openFile'], filters: [{ name: '녹음 파일', extensions: require('./core/phone-recv').AUDIO_EXT.filter((x) => x !== 'qta') }] });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ok: false, canceled: true, dto: P.toDTO(S.parsed) };
+    srcs = r.filePaths;
   }
-  const r = await _ownVoiceFromFile(pr, s, src, { trim: args.trim, label: args.fromMic ? '마이크 녹음' : path.basename(src) });
-  if (args.fromMic && path.dirname(src) === path.join(require('os').tmpdir(), 'priming-rec')) { try { fs.rmSync(src, { force: true }); } catch {} }   // 임시 녹음은 tts-N 에 옮겼으니 지운다
-  return { ...r, dto: P.toDTO(S.parsed) };
+  srcs.sort((a, b) => path.basename(a).localeCompare(path.basename(b), 'ko', { numeric: true }));
+  const label = (src) => (args.fromMic ? '마이크 녹음' : path.basename(src));
+  const tmpRec = path.join(require('os').tmpdir(), 'priming-rec');
+  const dropMic = (src) => { if (args.fromMic && path.dirname(src) === tmpRec) { try { fs.rmSync(src, { force: true }); } catch {} } };   // 임시 녹음은 tts-N 에 옮겼으니 지운다
+  if (sents.length === 1) {
+    if (srcs.length !== 1) return { ok: false, error: '클립 하나에는 녹음 파일 하나를 고르세요', dto: P.toDTO(S.parsed) };
+    const r = await _ownVoiceFromFile(pr, sents[0], srcs[0], { trim: args.trim, label: label(srcs[0]) });
+    dropMic(srcs[0]);
+    return { ...r, n: r.ok ? 1 : 0, dto: P.toDTO(S.parsed) };
+  }
+  let pairs = null, split = null;
+  if (srcs.length === sents.length) pairs = sents.map((s, i) => ({ s, src: srcs[i], label: label(srcs[i]) }));
+  else if (srcs.length === 1) {
+    const ff = require('./core/media-utils').getFfmpegPath(); const QT = require('./core/quiet-trim');
+    const pcm = await QT.decodePcm(srcs[0], ff);
+    if (!pcm) return { ok: false, error: '이 파일을 소리로 읽지 못했습니다', dto: P.toDTO(S.parsed) };
+    const sp = QT.splitAtPauses(pcm, 24000, sents.map((s) => String(s.text || '').replace(/\s+/g, '').length));
+    if (!sp) return { ok: false, error: `녹음에서 문장 사이 쉼을 ${sents.length - 1}곳 찾지 못했습니다 — 문장 사이를 조금(0.3초쯤) 쉬어 녹음하거나, 클립마다 파일을 따로 고르세요`, dto: P.toDTO(S.parsed) };
+    try { fs.mkdirSync(tmpRec, { recursive: true }); } catch {}
+    const stamp = Date.now();
+    pairs = sp.pieces.map((pc, i) => { const fp = path.join(tmpRec, `split_${stamp}_${i + 1}.wav`); fs.writeFileSync(fp, QT.wavOf(pc, 24000)); return { s: sents[i], src: fp, label: `${label(srcs[0])} (${i + 1}/${sents.length})`, tmp: true }; });
+    split = sp.cutsSec;
+  } else return { ok: false, error: `고른 클립 ${sents.length}개에 녹음 파일 ${srcs.length}개입니다 — 파일을 클립 수만큼 고르거나(이름 순서대로 넣음) 한 파일만 고르세요(쉼 자리에서 나눔)`, dto: P.toDTO(S.parsed) };
+  undoPush(`음성 덮어쓰기 ${pairs.length}개`);   // 한 번의 Ctrl+Z 로 모두 되돌린다
+  const res = [];
+  for (const pp of pairs) {
+    const r = await _ownVoiceFromFile(pr, pp.s, pp.src, { trim: args.trim, label: pp.label, noUndo: true });
+    res.push({ num: pp.s.num, ...r });
+    if (pp.tmp) { try { fs.rmSync(pp.src, { force: true }); } catch {} }
+  }
+  for (const x of srcs) dropMic(x);
+  const okN = res.filter((x) => x.ok).length, bad = res.filter((x) => !x.ok);
+  if (split) log(`🎙 녹음 하나를 쉼 ${split.length}곳(${split.map((x) => x.toFixed(1) + '초').join(' · ')})에서 나눠 클립 ${okN}개에 넣었습니다`);
+  return { ok: okN > 0, n: okN, failed: bad.map((x) => `컷${x.num}: ${x.error}`), split, dur: res.reduce((m, x) => m + (x.dur || 0), 0), trimmed: 0, error: okN ? null : (bad[0] && bad[0].error), dto: P.toDTO(S.parsed) };
 });
 // 🎙 내 녹음 파일 → 그 문장 음성(한 길 — 파일 고르기 · 🎤 마이크 · 📱 핸드폰 모두 여기를 거친다 · v1.0.53 에 핸들러에서 뽑음)
 //   24kHz 모노로 읽고 → ✂ 앞뒤 무음만 자른다(녹음 버튼을 누른 뒤·끄기 전의 빈 소리 · 사이 쉼은 그대로 · 판정은 quiet-trim 한 곳) → 새 WAV `<번호>_o<지문>.wav`
-//   o = { trim?(false = 자르지 않음), label(로그용) } → { ok, dur, trimmed } | { ok:false, error }
+//   o = { trim?(false = 자르지 않음), label(로그용), noUndo?(되돌리기 기록은 부른 쪽이 한 번) } → { ok, dur, trimmed } | { ok:false, error }
 async function _ownVoiceFromFile(pr, s, src, o = {}) {
   if (!src || !fs.existsSync(src)) return { ok: false, error: '파일을 찾을 수 없습니다' };
   const ff = require('./core/media-utils').getFfmpegPath();
@@ -11667,7 +11699,7 @@ async function _ownVoiceFromFile(pr, s, src, o = {}) {
   const dur = pcm.length / 24000;
   try { fs.mkdirSync(dir, { recursive: true }); const tmp = out + '.tmp'; fs.writeFileSync(tmp, QT.wavOf(pcm, 24000)); fs.renameSync(tmp, out); }
   catch (e) { return { ok: false, error: '녹음을 저장하지 못했습니다: ' + e.message }; }
-  undoPush('음성 덮어쓰기');
+  if (!o.noUndo) undoPush('음성 덮어쓰기');   // 여러 개를 한꺼번에 넣는 곳은 앞에서 한 번만
   s.ttsAudioPath = out; s.ttsDurationSec = dur; s.voiceOwn = true; delete s.quiet; delete s.wt;
   log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${o.label || path.basename(src)} (${dur.toFixed(1)}초${trimmed > 0.05 ? ` · 앞뒤 무음 ${trimmed.toFixed(1)}초 자름` : ''})`);
   storeActive(); syncSnapshotNow();
@@ -11676,7 +11708,7 @@ async function _ownVoiceFromFile(pr, s, src, o = {}) {
 // 📱 핸드폰에서 받기(v1.0.53 · 로이 2026-11-17) — core/phone-recv 가 같은 Wi-Fi 에 작은 페이지를 열고(QR) 핸드폰이 녹음을 올린다.
 //   받은 파일은 _ownVoiceFromFile 한 길로 · 대상 = 문장 id(편집으로 번호가 밀려도 같은 문장) · 대본이 바뀌면 받지 않는다(다른 대본에 들어가지 않게)
 //   🧪 E2E(PM_UI_SMOKE)는 127.0.0.1 에만 연다(시험 때 Windows 방화벽 창이 뜨지 않게)
-let _phone = null;   // { srv, scriptPath, shortsNum, sentId, autoNext, done[] }
+let _phone = null;   // { srv, scriptPath, shortsNum, sentId, autoNext, done[], queue:[문장 id]|null(여러 클립을 골랐을 때 그 차례만 · v1.0.54) }
 function _phoneFlat(pr) { return pr.groups.flatMap((g) => pr.getSentencesOfGroup(g).map((s, i) => ({ s, groupNum: g.num, sentIdx: i }))); }
 function _phoneTarget() {   // 롱폼 세계에서 부를 것 → { pr, s, groupNum, sentIdx } | { error }
   if (!_phone) return { error: '받기 창이 닫혔습니다' };
@@ -11687,20 +11719,26 @@ function _phoneTarget() {   // 롱폼 세계에서 부를 것 → { pr, s, group
 }
 const _phoneInfo = (t) => ({ groupNum: t.groupNum, sentIdx: t.sentIdx, num: t.s.num, text: String(t.s.text || ''), own: !!t.s.voiceOwn });
 function _phoneState() {
-  return WORLD.run('longform', () => { const t = _phoneTarget(); return t.error ? { ok: false, error: t.error } : { ok: true, ..._phoneInfo(t), done: _phone.done.slice(-20) }; });
+  return WORLD.run('longform', () => { const t = _phoneTarget(); if (t.error) return { ok: false, error: t.error }; const q = _phone.queue; return { ok: true, ..._phoneInfo(t), done: _phone.done.slice(-20), qi: q ? q.indexOf(t.s.id) + 1 : null, qn: q ? q.length : null }; });
 }
 async function _phoneOnFile({ path: fp, name, bytes }) {
   return WORLD.run('longform', async () => {
     const t = _phoneTarget(); if (t.error) return { ok: false, error: t.error };
     const r = await _ownVoiceFromFile(t.pr, t.s, fp, { label: '📱 핸드폰 ' + name + ' (' + (bytes / 1048576).toFixed(1) + 'MB)' });
     if (!r.ok) return r;
-    const line = `컷${t.s.num} · ${r.dur.toFixed(1)}초`;
+    const snip = (x) => { const q = String(x || '').replace(/\s+/g, ' ').trim(); return '「' + (q.length > 14 ? q.slice(0, 14) + '…' : q) + '」'; };
+    const line = `${snip(t.s.text)} · ${r.dur.toFixed(1)}초`;
     _phone.done.push(line);
     let next = null;
-    if (_phone.autoNext) { const fl = _phoneFlat(t.pr); const i = fl.findIndex((x) => x.s === t.s); next = i >= 0 ? fl[i + 1] || null : null; if (next) _phone.sentId = next.s.id; }
+    if (_phone.autoNext) {
+      const fl = _phoneFlat(t.pr);
+      if (_phone.queue) { const qi = _phone.queue.indexOf(t.s.id); const nid = qi >= 0 ? _phone.queue[qi + 1] : null; next = nid ? fl.find((x) => x.s.id === nid) || null : null; }
+      else { const i = fl.findIndex((x) => x.s === t.s); next = i >= 0 ? fl[i + 1] || null : null; }
+      if (next) _phone.sentId = next.s.id;
+    }
     const nt = _phoneTarget(); const target = nt.error ? null : _phoneInfo(nt);
-    try { if (win && !win.isDestroyed()) win.webContents.send('phone-recv-got', { ok: true, num: t.s.num, dur: r.dur, trimmed: r.trimmed, name, target, last: !!(_phone.autoNext && !next), dto: P.toDTO(S.parsed) }); } catch {}
-    return { ok: true, msg: `컷${t.s.num} 에 넣었습니다 (${r.dur.toFixed(1)}초${r.trimmed > 0.05 ? ` · 앞뒤 무음 ${r.trimmed.toFixed(1)}초 자름` : ''})${_phone.autoNext && !next ? ' — 마지막 클립입니다' : ''}`, state: _phoneState() };
+    try { if (win && !win.isDestroyed()) win.webContents.send('phone-recv-got', { ok: true, num: t.s.num, got: { groupNum: t.groupNum, sentIdx: t.sentIdx }, dur: r.dur, trimmed: r.trimmed, name, target, last: !!(_phone.autoNext && !next), dto: P.toDTO(S.parsed) }); } catch {}
+    return { ok: true, msg: `${snip(t.s.text)}에 넣었습니다 (${r.dur.toFixed(1)}초${r.trimmed > 0.05 ? ` · 앞뒤 무음 ${r.trimmed.toFixed(1)}초 자름` : ''})${_phone.autoNext && !next ? (_phone.queue ? ' — 고른 클립을 모두 받았습니다' : ' — 마지막 클립입니다') : ''}`, state: _phoneState() };
   });
 }
 function _phoneStop() { if (_phone && _phone.srv) { try { _phone.srv.stop(); } catch {} } _phone = null; }
@@ -11718,10 +11756,14 @@ ipcMain.handle('phone-recv-start', async (_e, args = {}) => {
     _phone = { srv, done: [] };
     log(`📱 핸드폰 받기 열림 — ${addrs.map((a) => a.ip).join(' · ')} :${srv.port} (창을 닫으면 닫힙니다)`);
   }
-  Object.assign(_phone, { scriptPath: S.scriptPath, shortsNum: c.pr.shortsNum, sentId: s.id, autoNext: args.autoNext !== false });
+  // 여러 클립을 골랐으면 그 문장들만 대본 순서로 차례를 돈다(v1.0.54)
+  const fl = _phoneFlat(c.pr); const ids = new Set();
+  for (const it of args.items || []) { const x = _sentAt(c.pr, it.groupNum, it.sentIdx); if (x) ids.add(x.id); }
+  const queue = ids.size > 1 ? fl.filter((x) => ids.has(x.s.id)).map((x) => x.s.id) : null;
+  Object.assign(_phone, { scriptPath: S.scriptPath, shortsNum: c.pr.shortsNum, sentId: queue ? queue[0] : s.id, autoNext: args.autoNext !== false, queue });
   const urls = addrs.map((a) => ({ ...a, url: _phone.srv.url(a.ip) }));
   const t = _phoneTarget();
-  return { ok: true, urls, qrSvg: require('./core/qr').qrSvg(urls[0].url), target: t.error ? null : _phoneInfo(t) };
+  return { ok: true, urls, qrSvg: require('./core/qr').qrSvg(urls[0].url), target: t.error ? null : _phoneInfo(t), queue: queue ? queue.map((id) => { const x = fl.find((y) => y.s.id === id); return { groupNum: x.groupNum, sentIdx: x.sentIdx }; }) : null };
 });
 ipcMain.handle('phone-recv-target', async (_e, args = {}) => {
   if (!_phone) return { ok: false, error: '받기 창이 닫혔습니다' };

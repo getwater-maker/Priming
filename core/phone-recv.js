@@ -69,7 +69,7 @@ function $(i){return document.getElementById(i)}
 function st(m,c){var e=$('st');e.textContent=m;e.className=c||''}
 function show(s){
   if(!s||!s.ok){$('lbl').textContent=(s&&s.error)||'PC 에서 받을 클립이 없습니다';$('txt').textContent='';return}
-  $('lbl').textContent='지금 넣을 클립: 컷 '+s.num+(s.own?' · 이미 내 녹음 있음(새로 보내면 바뀝니다)':'');$('txt').textContent=s.text||'';
+  $('lbl').textContent='지금 넣을 문장'+(s.qn?' ('+s.qi+'/'+s.qn+')':'')+(s.own?' · 이미 내 녹음 있음(새로 보내면 바뀝니다)':'');$('txt').textContent=s.text||'';
   var ul=$('done');if(s.done&&s.done.length){ul.innerHTML='';s.done.slice(-8).reverse().forEach(function(d){var li=document.createElement('li');li.textContent=d;ul.appendChild(li)})}
 }
 function poll(){

@@ -104,15 +104,20 @@ function compactPcm(pcm, rate, { maxGap, edge, pad = 0 }) {
 //   사이 쉼은 건드리지 않는다 · 정적 기준 = 말 대표음량 −40dB(compactPcm 과 같다) — 방 잡음이 그보다 크면 잡음 +6dB(말보다 15dB 이상 작을 때만)
 //   말 시작 = 50ms 넘게 이어진 소리(마우스 딸깍 한 번은 말로 치지 않는다) · 앞 0.15초 · 뒤 0.25초는 남긴다 · 판단이 안 서면 null(자르지 않음)
 const TRIM_LEAD = 0.15, TRIM_TAIL = 0.25, TRIM_MIN_RUN = 5;
-function trimEdges(pcm, rate) {
-  if (!pcm || pcm.length < rate * 0.3) return null;
-  const { dbs, n } = frameDbs(pcm, rate);
+// 녹음의 정적 기준(dB) — 판단이 안 서면 null · trimEdges·splitAtPauses 가 같이 쓴다
+function recSilenceThr(dbs) {
   const sorted = dbs.slice().sort((a, b) => a - b);
   const speech = sorted[Math.floor(sorted.length * 0.95)];   // 녹음은 앞뒤 빈 소리가 길 수 있어 compactPcm(90%)보다 위에서 잰다
   if (!(speech >= ABS_FLOOR_DB)) return null;
   const noise = sorted[Math.floor(sorted.length * 0.1)];
   let thr = speech - GAP_DROP_DB;
   if (noise + 6 > thr) { if (noise + 6 > speech - 15) return null; thr = noise + 6; }
+  return thr;
+}
+function trimEdges(pcm, rate) {
+  if (!pcm || pcm.length < rate * 0.3) return null;
+  const { dbs, n } = frameDbs(pcm, rate);
+  const thr = recSilenceThr(dbs); if (thr == null) return null;
   const loud = dbs.map((d) => d > thr);
   const runAt = (i, dir) => { let k = 0; for (let j = i; j >= 0 && j < loud.length && loud[j]; j += dir) k++; return k; };
   let a = -1; for (let i = 0; i < loud.length; i++) if (loud[i] && runAt(i, 1) >= TRIM_MIN_RUN) { a = i; break; }
@@ -125,6 +130,50 @@ function trimEdges(pcm, rate) {
   const xf = Math.min(Math.round(rate * XFADE_MS / 1000), Math.floor(out.length / 2));
   for (let k = 0; k < xf; k++) { if (s > 0) out[k] = Math.round(out[k] * (k / xf)); if (e < pcm.length) out[out.length - 1 - k] = Math.round(out[out.length - 1 - k] * (k / xf)); }
   return { pcm: out, removedSec: (pcm.length - out.length) / rate };
+}
+
+// ✂ 한 녹음을 여러 문장으로 나누기(v1.0.54 · 여러 클립에 녹음 파일 하나) — 문장 사이 쉼(0.12초 이상) 중에서
+//   글자 수 비율로 예상한 자리에 가장 가까운 쉼을 순서대로 고른다(DP · 긴 쉼에 조금 가산점) → 쉼 가운데에서 자른 PCM 조각들 | null
+//   weights = 문장마다 글자 수(공백 빼고) · 쉼이 문장 수보다 적으면 null(억지로 자르지 않는다) · 앞뒤 무음은 _ownVoiceFromFile 이 조각마다 자른다
+const SPLIT_MIN_GAP = 0.12;
+function splitAtPauses(pcm, rate, weights) {
+  const K = (weights || []).length;
+  if (!pcm || K < 2) return null;
+  const { dbs, n } = frameDbs(pcm, rate);
+  const thr = recSilenceThr(dbs); if (thr == null) return null;
+  const loud = dbs.map((d) => d > thr);
+  let a = loud.indexOf(true), b = loud.lastIndexOf(true);
+  if (a < 0 || b <= a) return null;
+  const runs = [];   // 말 사이 쉼 [시작 프레임, 끝 프레임)
+  for (let i = a; i <= b;) {
+    if (loud[i]) { i++; continue; }
+    let j = i; while (j <= b && !loud[j]) j++;
+    if ((j - i) * FRAME_MS / 1000 >= SPLIT_MIN_GAP) runs.push({ c: ((i + j) / 2) * FRAME_MS / 1000, len: (j - i) * FRAME_MS / 1000 });
+    i = j;
+  }
+  const need = K - 1;
+  if (runs.length < need) return null;
+  const t0 = a * FRAME_MS / 1000, t1 = (b + 1) * FRAME_MS / 1000, tot = t1 - t0;
+  const W = weights.map((w) => Math.max(1, Number(w) || 1)); const sumW = W.reduce((x, y) => x + y, 0);
+  const exp = []; let acc = 0; for (let k = 0; k < need; k++) { acc += W[k]; exp.push(t0 + tot * acc / sumW); }
+  const cost = (k, r) => Math.abs(runs[r].c - exp[k]) - 0.3 * Math.min(runs[r].len, 1);
+  const R = runs.length; const INF = 1e18;
+  const dp = Array.from({ length: need }, () => new Array(R).fill(INF)); const from = Array.from({ length: need }, () => new Array(R).fill(-1));
+  for (let r = 0; r < R; r++) dp[0][r] = cost(0, r);
+  for (let k = 1; k < need; k++) {
+    let best = INF, bi = -1;
+    for (let r = k; r < R; r++) {
+      if (dp[k - 1][r - 1] < best) { best = dp[k - 1][r - 1]; bi = r - 1; }
+      if (bi >= 0) { dp[k][r] = best + cost(k, r); from[k][r] = bi; }
+    }
+  }
+  let end = -1, bestEnd = INF; for (let r = need - 1; r < R; r++) if (dp[need - 1][r] < bestEnd) { bestEnd = dp[need - 1][r]; end = r; }
+  if (end < 0) return null;
+  const pick = []; for (let k = need - 1, r = end; k >= 0; k--) { pick.unshift(r); r = from[k][r]; }
+  const cuts = pick.map((r) => Math.round(runs[r].c * rate));
+  const bounds = [0, ...cuts, pcm.length];
+  const pieces = []; for (let i = 0; i < K; i++) pieces.push(new Int16Array(pcm.subarray(bounds[i], bounds[i + 1])));
+  return { pieces, cutsSec: cuts.map((c) => c / rate) };
 }
 
 function wavOf(pcm, rate) {
@@ -246,4 +295,4 @@ async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
   return r;
 }
 
-module.exports = { effPreset, keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, trimEdges, wavOf, decodePcm, ensureSentences, VER };
+module.exports = { effPreset, keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, trimEdges, splitAtPauses, wavOf, decodePcm, ensureSentences, VER };

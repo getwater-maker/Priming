@@ -55,9 +55,9 @@ const SCRIPT = ['# 덮어쓰기 시험', '', '## 장', '### ① 첫 장면', '> 
     const dur = await win.evaluate(async () => { const r = await window.api.listQueue(); const s = r.dto.projects[0].cuts[0].sentences[0]; return s.dur != null ? s.dur : (s.ttsDurationSec != null ? s.ttsDurationSec : null); });
     ok(dur == null || Math.abs(dur - 3) < 0.3, `음성 길이 ≈ 3초(${dur})`);
 
-    console.log('\n[3] 둘 이상 고르면 거부');
+    console.log('\n[3] 둘 이상 고르고 쉼 없는 파일 하나 → 나누지 못한다고 알린다(v1.0.54 — 여러 클립 지원 · 자세한 시험은 test:record [7])');
     const r2 = await win.evaluate(async () => window.api.clipVoiceOverwrite({ shortsNum: 1, items: [{ groupNum: 1, sentIdx: 0 }, { groupNum: 1, sentIdx: 1 }], path: null }));
-    ok(r2 && r2.ok === false && /하나씩/.test(r2.error || ''), `거부: ${r2 && r2.error}`);
+    ok(r2 && r2.ok === false && /쉼/.test(r2.error || ''), `알림: ${r2 && r2.error}`);
 
     console.log('\n[4] Ctrl+Z · 해제 · 새로고침 유지');
     await win.evaluate(() => document.body.click()); await win.keyboard.press('Control+z'); await win.waitForTimeout(1000);

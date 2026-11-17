@@ -73,7 +73,7 @@ function mk(parts) {
     const ctx = async (ln) => { await win.locator(`.sent[data-ln="${ln}"] .clip-r1`).first().click({ button: 'right', position: { x: 4, y: 4 } }); await win.waitForSelector('[data-testid="clip-ctx"]'); };
 
     await sel(1, 2); await ctx(1); await win.click('[data-testid="cx-rec"]'); await win.waitForTimeout(400);
-    ok(await win.locator('[data-testid="rec-panel"]').count() === 0, '클립을 둘 이상 고르면 창이 열리지 않는다(녹음 하나 = 문장 하나)');
+    ok(/\(1\/2\)/.test(await win.locator('[data-testid="rec-panel"] b').first().innerText()), '문장 둘을 고르면 차례 녹음 창(1/2)이 열린다(v1.0.54)'); await win.keyboard.press('Escape'); await win.waitForTimeout(300);
 
     // AI 목소리 탭 「내 목소리 ▸ 녹음」으로 연다
     await pick(1); const recBefore = recFiles();
@@ -158,6 +158,78 @@ function mk(parts) {
     await win.click('[data-testid="ctb-voice-rec"]'); await win.waitForSelector('[data-testid="rec-panel"]', { timeout: 3000 });
     ok((await win.locator('[data-testid="rec-text"]').innerText()).includes('첫 문장은'), '🎙 마이크로 녹음 → 그 클립 녹음 창');
     await win.keyboard.press('Escape'); await win.waitForTimeout(300);
+
+    // ── v1.0.54 (로이 「6·7번을 고르면 작동 안 한다」 · 「체크박스 주변을 누르면 체크가 풀린다」)
+    const ALL = [{ groupNum: 1, sentIdx: 0 }, { groupNum: 1, sentIdx: 1 }, { groupNum: 2, sentIdx: 0 }];
+    const clearAll = async () => { await win.evaluate(async (items) => window.api.clipVoiceOverwrite({ shortsNum: 1, items, clear: true }), ALL); await win.waitForTimeout(300); };
+    const chk = (ln) => win.locator(`.sent[data-ln="${ln}"] .clip-chk`).first().isChecked();
+    const noCell = async (ln, where) => {   // 번호 칸 안 — 체크박스·번호 글자가 아닌 빈 곳(아래 왼쪽 끝) 또는 번호 글자
+      await win.locator(`.sent[data-ln="${ln}"]`).first().evaluate((e) => e.scrollIntoView({ block: 'center' })); await win.waitForTimeout(120);
+      if (where === 'num') { await win.locator(`.sent[data-ln="${ln}"] .clip-no .clip-no-n`).first().click(); }
+      else { const b = await win.locator(`.sent[data-ln="${ln}"] .clip-no`).first().boundingBox(); await win.mouse.click(b.x + 3, b.y + b.height - 3); }
+      await win.waitForTimeout(250);
+    };
+    await clearAll();
+
+    console.log('\n[5] 번호 칸(노랑·파랑) 어디를 눌러도 체크');
+    await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    await noCell(1, 'edge');
+    const hitChk = await win.evaluate(() => { const c = document.querySelector('.sent[data-ln="1"] .clip-no'); const b = c.getBoundingClientRect(); const el = document.elementFromPoint(b.left + 3, b.bottom - 3); return el && el.classList ? el.className : String(el); });
+    ok(await chk(1), `번호 칸 빈 곳을 누르면 체크 (누른 곳: ${hitChk})`);
+    await noCell(3, 'edge');
+    ok(await chk(1) && await chk(3), '다른 클립 번호 칸을 누르면 체크가 더해진다(앞 체크가 풀리지 않는다)');
+    await noCell(1, 'num');
+    ok(!(await chk(1)) && await chk(3), '번호 글자를 다시 누르면 그 클립만 체크 해제');
+    await noCell(1, 'edge');
+    ok(await chk(1) && await chk(3), '다시 누르면 다시 체크');
+
+    console.log('\n[6] 여러 클립(1·3번 문장) — 마이크 녹음은 고른 클립 차례로');
+    await win.click('.menus button[data-menu="voice"]'); await win.waitForSelector('.ribbon[data-menu-on="voice"]');
+    await win.click('[data-testid="rb-v-record"]'); await win.waitForSelector('[data-testid="rec-panel"]', { timeout: 3000 });
+    const title = () => win.locator('[data-testid="rec-panel"] b').first().innerText();
+    ok(/\(1\/2\)/.test(await title()) && (await win.locator('[data-testid="rec-text"]').innerText()).includes('첫 문장은'), '창 제목 (1/2) · 첫 문장 ' + await title());
+    const recOnce = async () => { await win.keyboard.press('Space'); await win.waitForSelector('[data-testid="rec-live"]', { timeout: 8000 }); await win.waitForTimeout(1500); await win.keyboard.press('Space'); await win.waitForSelector('[data-testid="rec-audio"]', { timeout: 8000 }); };
+    await recOnce(); await win.keyboard.press('Enter'); await win.waitForTimeout(2500);
+    ok(/\(2\/2\)/.test(await title()) && (await win.locator('[data-testid="rec-text"]').innerText()).includes('셋째 문장입니다'), '덮어쓰고 다음 → 고른 다음 클립(셋째 · 둘째는 건너뜀) ' + await title());
+    ok(/마치기/.test(await win.locator('[data-testid="rec-apply-next"]').innerText()), '마지막 차례 단추 = 덮어쓰고 마치기');
+    await recOnce(); await win.keyboard.press('Enter'); await win.waitForTimeout(2500);
+    s = await sents();
+    ok(await win.locator('[data-testid="rec-panel"]').count() === 0 && s[0].ow === 1 && s[1].ow === 0 && s[2].ow === 1, `다 돌면 닫힌다 · 고른 두 문장만 내 녹음 ${JSON.stringify(s.map((x) => x.ow))}`);
+    ok(await chk(1) && await chk(3), '녹음 차례를 도는 동안 체크(선택)는 그대로');
+    await clearAll();
+
+    console.log('\n[7] 여러 클립 — 녹음 파일');
+    const tone = (name, parts) => {   // parts = [[초, 소리?]] → m4a
+      const f = path.join(outDir, name); const ins = []; const lbl = [];
+      parts.forEach(([d, on], i) => { ins.push('-f', 'lavfi', '-i', on ? `sine=frequency=330:duration=${d}:sample_rate=44100` : `anullsrc=r=44100:cl=mono:d=${d}`); lbl.push(`[${i}]`); });
+      execFileSync(FF, ['-y', '-loglevel', 'error', ...ins, '-filter_complex', `${lbl.join('')}concat=n=${parts.length}:v=0:a=1`, '-ac', '1', '-c:a', 'aac', f]); return f;
+    };
+    const fa = tone('음성 002.m4a', [[1, true]]), fb = tone('음성 010.m4a', [[2, true]]);
+    const two = [ALL[2], ALL[0]];   // 화면 순서와 다르게 보내도 대본 순서로
+    let r = await win.evaluate(async (a) => window.api.clipVoiceOverwrite({ shortsNum: 1, items: a.items, paths: a.paths }), { items: two, paths: [fb, fa] });
+    s = await sents();
+    ok(r.ok && r.n === 2 && s[0].ow === 1 && s[2].ow === 1 && s[1].ow === 0, `파일 2개 = 클립 2개 → 넣음 ${JSON.stringify(s.map((x) => x.ow))}`);
+    ok(Math.abs(s[0].dur - 1) < 0.1 && Math.abs(s[2].dur - 2) < 0.1, `이름 순서(002 → 1번 문장 · 010 → 3번 문장 — 숫자 순서) ${s[0].dur && s[0].dur.toFixed(2)} · ${s[2].dur && s[2].dur.toFixed(2)}`);
+    await win.evaluate(async () => window.api.undo({})); await win.waitForTimeout(600);
+    s = await sents();
+    ok(s[0].ow === 0 && s[2].ow === 0, 'Ctrl+Z 한 번에 둘 다 되돌린다');
+    r = await win.evaluate(async (a) => window.api.clipVoiceOverwrite({ shortsNum: 1, items: a.items, paths: a.paths }), { items: two, paths: [fa, fb, fa] });
+    ok(!r.ok && /파일 3개/.test(r.error || ''), '파일 수가 안 맞으면 거절: ' + r.error);
+    const fs1 = tone('한번에.m4a', [[0.5, false], [2, true], [0.7, false], [1, true], [0.5, false]]);
+    r = await win.evaluate(async (a) => window.api.clipVoiceOverwrite({ shortsNum: 1, items: a.items, paths: a.paths }), { items: two, paths: [fs1] });
+    s = await sents();
+    ok(r.ok && r.n === 2 && r.split && r.split.length === 1 && Math.abs(r.split[0] - 2.85) < 0.1, `파일 하나 → 쉼 자리(${r.split && r.split[0].toFixed(2)}초 · 예상 2.85)에서 나눔`);
+    ok(Math.abs(s[0].dur - 2.4) < 0.15 && Math.abs(s[2].dur - 1.4) < 0.15, `나눈 조각 = 말 + 앞뒤 여백 (${s[0].dur && s[0].dur.toFixed(2)} ≈ 2.4 · ${s[2].dur && s[2].dur.toFixed(2)} ≈ 1.4)`);
+    await win.evaluate(async () => window.api.undo({})); await win.waitForTimeout(600);
+    r = await win.evaluate(async (a) => window.api.clipVoiceOverwrite({ shortsNum: 1, items: a.items, paths: a.paths }), { items: two, paths: [fb] });
+    ok(!r.ok && /쉼/.test(r.error || '') && (await sents()).every((x) => x.ow === 0), '쉼이 없는 한 파일은 억지로 나누지 않고 알린다: ' + r.error);
+    ok(!fs.existsSync(path.join(os.tmpdir(), 'priming-rec')) || fs.readdirSync(path.join(os.tmpdir(), 'priming-rec')).filter((f) => /^split_/.test(f)).length === 0, '나눈 임시 조각은 남지 않는다');
+    // 화면 단추(체크 1·3 그대로) — 파일 고르기 창이 두 파일을 돌려줄 때
+    await app.evaluate(({ dialog }, ps) => { dialog.showOpenDialog = async (_w, o) => ({ canceled: false, filePaths: (o && o.properties || []).includes('multiSelections') ? ps : ps.slice(0, 1) }); }, [fb, fa]);
+    await win.click('[data-testid="rb-v-file"]'); await win.waitForTimeout(2500);
+    s = await sents();
+    ok(s[0].ow === 1 && s[2].ow === 1 && Math.abs(s[0].dur - 1) < 0.1, `AI 목소리 탭 📂 파일 — 체크한 두 클립에 이름 순서대로 ${JSON.stringify(s.map((x) => x.ow))}`);
+    await clearAll();
     ok(errors.length === 0, '화면 오류 없음 ' + errors.join(' | ').slice(0, 200));
   } catch (e) { fail++; console.log('  ✗ 예외 ' + (e && e.stack || e)); }
   finally { await app.close().catch(() => {}); for (const f of [MD, SNAP]) { try { fs.rmSync(f, { force: true }); } catch {} } try { fs.rmSync(outDir, { recursive: true, force: true }); } catch {} }

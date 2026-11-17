@@ -75,13 +75,17 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       await win.evaluate((k) => { const pane = document.querySelector('main.pane2'); if (pane) pane.scrollTop = 4000 + k * 9000; }, k); await win.waitForTimeout(500);
       const pt = await win.evaluate(() => { const pm = document.querySelector('main.pane2'); if (!pm) return { err: [...document.querySelectorAll('main')].length + ':' + document.body.innerText.slice(0, 80) }; const pane = pm.getBoundingClientRect(); const els = [...document.querySelectorAll('main.pane2 .sent.clip .clip-no-n')].filter((e) => { const r = e.getBoundingClientRect(); return r.width && r.top > pane.top + 120 && r.bottom < pane.bottom - 60; }); const e = els[2]; if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
       if (!pt || pt.err) { console.log('  ! 요소 없음', JSON.stringify(pt), errors.join(' | ').slice(0, 400)); barMs.push(99999); continue; }
-      const prevTop = await win.evaluate(() => { const b = document.querySelector('[data-testid=clip-tb]'); return b ? b.style.top + '/' + b.style.left : ''; });
+      
+      // v1.0.54 — 번호 칸 클릭 = 체크(더하기)라, 잴 때마다 앞 선택을 풀고 새로 하나를 체크한다(안 풀면 막대 자리가 그대로라 5초 시간초과)
+      await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(250);
       const t0 = Date.now(); await win.mouse.click(pt.x, pt.y);
-      await win.waitForFunction((pv) => { const b = document.querySelector('[data-testid=clip-tb]'); return b && (b.style.top + '/' + b.style.left) !== pv; }, prevTop, { timeout: 5000, polling: 'raf' }).catch(() => {});
+      await win.waitForFunction(() => !!document.querySelector('[data-testid=clip-tb]'), null, { timeout: 5000, polling: 'raf' }).catch(() => {});
       barMs.push(Date.now() - t0); await win.waitForTimeout(300);
     }
     console.log('  실제 클릭 → 검은 도구 막대 (ms):', barMs.join(' / '));
-    ok(Math.max(...barMs.slice(1)) < 400 && barMs[0] < 900, `도구 막대가 뜨기까지 ${barMs.join('/')}ms (처음 < 900 · 이후 < 400)`);
+    // v1.0.54 — 재는 장면이 「선택을 풀고 새로 체크해 막대가 처음 뜨기」로 바뀌었다(옛 400ms 는 막대가 이미 떠 있고 자리만 옮기는 장면).
+    //   같은 조건에서 바뀌지 않은 체크박스 클릭도 396~475ms(작업노트 2026-11 v1.0.54 A/B) → 기준 700ms. 이보다 느려지면 진짜 느려진 것이다.
+    ok(Math.max(...barMs.slice(1)) < 700 && barMs[0] < 900, `도구 막대가 뜨기까지 ${barMs.join('/')}ms (처음 < 900 · 이후 < 700 — 새로 체크해 막대가 처음 뜨는 장면)`);
     if (process.env.PERF_SHOT) { await win.evaluate(() => { document.querySelector('main.pane2').scrollTop = 6000; }); await win.waitForTimeout(500); const b = await win.evaluate(() => { const r = document.querySelector('.card h2').getBoundingClientRect(); const pt = document.querySelector('main.pane2').getBoundingClientRect().top; return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), gap: Math.round(r.y - pt) }; }); console.log('  h2 틈', b.gap); await win.screenshot({ path: process.env.PERF_SHOT, clip: { x: b.x, y: Math.max(0, b.y - 40), width: Math.min(b.w, 900), height: 120 } }); }
     const rs = [];
     for (const n of [5, 400, 900, 1500, 1900, 40]) { const r = await measure(n); rs.push(r); console.log('  클립', n, JSON.stringify(r)); await win.waitForTimeout(400); }

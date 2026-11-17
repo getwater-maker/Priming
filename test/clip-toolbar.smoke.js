@@ -128,8 +128,9 @@ const md = () => fs.readFileSync(MD, 'utf8');
     console.log('\n[6] v0.7.80 — 막대는 체크박스로만 · 오른쪽 클릭 메뉴');
     await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(150);
     await win.locator('.sent[data-ln="2"] .clip-no .clip-no-n').first().click(); await win.waitForTimeout(300);
-    ok(await win.locator('.sent[data-ln="2"].picked').count() >= 1 && await win.locator('[data-testid="clip-tb"]').count() === 0, '🔑 번호를 눌러 고르기만 하면 막대는 안 뜬다');
-    ok(!(await win.locator('.sent[data-ln="2"] .clip-chk').first().isChecked()), '🔑 번호를 눌러 고른 클립의 체크박스는 체크되지 않는다(체크박스를 눌렀을 때만 체크)');
+    // v1.0.54(로이 「체크박스 주변을 누르면 체크가 풀린다」) — 번호 칸 클릭 = 체크박스와 같다(옛 「번호 클릭 = 체크 없이 고르기」 폐기)
+    ok(await win.locator('.sent[data-ln="2"].picked').count() >= 1 && await win.locator('[data-testid="clip-tb"]').count() === 1, '🔑 번호 칸을 누르면 체크와 같아 막대가 뜬다(v1.0.54)');
+    ok(await win.locator('.sent[data-ln="2"] .clip-chk').first().isChecked(), '🔑 번호 칸을 누른 클립의 체크박스가 체크된다(v1.0.54)');
     await win.locator('.sent[data-ln="3"] .clip-body .clip-r1').first().click({ position: { x: 4, y: 4 } }); await win.waitForTimeout(250);
     ok(!(await win.locator('.sent[data-ln="3"] .clip-chk').first().isChecked()), '클립 빈 자리를 눌러도 체크되지 않는다');
     await win.locator('.sent[data-ln="2"] .clip-chk').first().click(); await win.waitForTimeout(250);

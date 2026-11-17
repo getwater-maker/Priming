@@ -104,7 +104,7 @@ print('BAD', bad); print('BROKEN', 'same' if b==open(os.path.join(d,'q1.txt'),en
 
   console.log('\n[2] 실제 앱');
   const M = read('main.js');
-  ok(/_phoneOnFile[\s\S]{0,400}_ownVoiceFromFile\(/.test(M) && (M.match(/_ownVoiceFromFile\(/g) || []).length === 3, '받은 파일도 덮어쓰기 한 길(_ownVoiceFromFile · 정의 + 고르기 + 핸드폰)');
+  ok(/_phoneOnFile[\s\S]{0,400}_ownVoiceFromFile\(/.test(M) && (M.match(/async function _ownVoiceFromFile\(/g) || []).length === 1 && /ipcMain\.handle\('clip-voice-overwrite'[\s\S]{0,6000}await _ownVoiceFromFile\(/.test(M), '받은 파일도 덮어쓰기 한 길(_ownVoiceFromFile 하나 · 파일 고르기·핸드폰이 함께 씀)');
   const rec = path.join(WORK, 'phone.m4a');
   execFileSync(FF, ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono:d=1', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=2:sample_rate=44100', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono:d=1.5', '-filter_complex', '[0][1][2]concat=n=3:v=0:a=1', '-c:a', 'aac', rec]);
   const recBuf = fs.readFileSync(rec);
@@ -159,6 +159,21 @@ print('BAD', bad); print('BROKEN', 'same' if b==open(os.path.join(d,'q1.txt'),en
     await win.click('[data-testid="phone-close"]'); await win.waitForTimeout(500);
     ok(await win.locator('[data-testid="phone-panel"]').count() === 0 && (await req(url + '/state')).status === 0, '닫기 → 창 · 서버 모두 닫힘');
 
+    // 여러 클립(1·3번 문장 체크) → 그 차례로만 받는다(v1.0.54)
+    await win.evaluate(async () => window.api.clipVoiceOverwrite({ shortsNum: 1, items: [{ groupNum: 1, sentIdx: 0 }, { groupNum: 1, sentIdx: 1 }, { groupNum: 2, sentIdx: 0 }], clear: true }));
+    await win.keyboard.press('Escape'); await win.keyboard.press('Escape'); await win.waitForTimeout(200);
+    for (const ln of [1, 3]) { await win.locator(`.sent[data-ln="${ln}"]`).first().evaluate((e) => e.scrollIntoView({ block: 'center' })); await win.locator(`.sent[data-ln="${ln}"] .clip-chk`).first().click(); await win.waitForTimeout(200); }
+    await win.click('.menus button[data-menu="voice"]'); await win.waitForSelector('.ribbon[data-menu-on="voice"]');
+    await win.click('[data-testid="rb-v-phone"]'); await win.waitForSelector('[data-testid="phone-qr"] svg', { timeout: 8000 });
+    const url2 = await win.getAttribute('[data-testid="phone-panel"]', 'data-url');
+    ok(/\(1\/2/.test(await win.locator('[data-testid="phone-target"]').innerText()) && js(await req(url2 + '/state')).qn === 2, '체크한 클립 2개 → 차례 (1/2) · 핸드폰 상태도 1/2: ' + await win.locator('[data-testid="phone-target"]').innerText());
+    const m1 = js(await req(url2 + '/up?name=a.m4a', { method: 'POST', body: recBuf })); await win.waitForTimeout(600);
+    ok(m1.ok && (await win.locator('[data-testid="phone-text"]').innerText()).includes('셋째 문장입니다'), '받으면 고른 다음 클립(셋째 · 둘째는 건너뜀)');
+    const m2 = js(await req(url2 + '/up?name=b.m4a', { method: 'POST', body: recBuf })); await win.waitForTimeout(600);
+    s = await sents();
+    ok(m2.ok && /고른 클립을 모두 받았습니다/.test(m2.msg || '') && s[0].ow === 1 && s[1].ow === 0 && s[2].ow === 1, `다 받으면 알림 · 고른 두 문장만 ${JSON.stringify(s.map((x) => x.ow))} · ${m2.msg}`);
+    ok(/클립 \d/.test(await win.locator('[data-testid="phone-target"]').innerText()), 'PC 창은 작업창과 같은 클립 번호로 보여 준다');
+    await win.click('[data-testid="phone-close"]'); await win.waitForTimeout(400);
     // 다른 입구
     await pick(3);
     await win.locator('.sent[data-ln="3"] .clip-r1').first().click({ button: 'right', position: { x: 4, y: 4 } }); await win.waitForSelector('[data-testid="clip-ctx"]');

@@ -6826,9 +6826,14 @@ export default function App() {
   }
   // 🎤 마이크로 녹음해서 덮어쓰기(v1.0.51 · 로이 2026-11-17) — MediaRecorder → rec-save(임시 파일) → 이미 있는 clip-voice-overwrite(path)
   //   창에 그 클립(문장) 글을 크게 보여 주고 · 「덮어쓰고 다음 클립」으로 대본을 이어서 녹음한다 · Space = 녹음/정지 · Enter = 덮어쓰고 다음 · Esc = 닫기
+  // 작업창에 보이는 클립 번호(② 줄 번호) — 한 문장이 여러 클립(줄)이면 「클립 7~8」 · DTO 문장에는 번호가 없다(v1.0.51~53 창 제목이 「컷」만 보였다)
+  function clipLabel(sn, groupNum, sentIdx) {
+    const PL = linesMap.get(sn); const ls = PL ? PL.list.filter((x) => x.groupNum === groupNum && x.sentIdx === sentIdx) : [];
+    return ls.length ? '클립 ' + ls[0].n + (ls.length > 1 ? '~' + ls[ls.length - 1].n : '') : '클립';
+  }
   function recInfo(sn, groupNum, sentIdx) {
     const s = capSentence(sn, groupNum, sentIdx);
-    return { sn, groupNum, sentIdx, num: s ? s.num : null, text: s ? String(s.text || '') : '', own: !!(s && s.ow) };
+    return { sn, groupNum, sentIdx, lbl: clipLabel(sn, groupNum, sentIdx), text: s ? String(s.text || '') : '', own: !!(s && s.ow) };
   }
   function recStopMeter() {
     const r = recRef.current;
@@ -6845,14 +6850,20 @@ export default function App() {
     setRecPanel((p) => { if (p && p.url) { try { URL.revokeObjectURL(p.url); } catch (_) {} } return p; });
   }
   function recClose() { recCleanup(); setRecPanel(null); }
+  // 고른 클립 → 문장 목록(대본 순서 · 같은 문장의 여러 줄은 하나) — 여러 클립 녹음·핸드폰 받기의 차례(v1.0.54)
+  function selSents(sel) {
+    const out = []; const seen = new Set();
+    for (const it of [...((sel && sel.items) || [])].sort((a, b) => a.n - b.n)) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); out.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    return out;
+  }
   function openRec() {
     if (!clipSelOk()) { setStatus('🎤 녹음해서 덮어쓸 클립을 먼저 고르세요'); return; }
-    const uniq = new Set(capSel.items.map((x) => x.groupNum + ':' + x.sentIdx));
-    if (uniq.size !== 1) { setStatus('🎤 녹음은 클립 하나씩 합니다(녹음 한 개 = 문장 한 개)'); return; }
+    // 여러 클립(문장)을 골랐으면 그 문장들을 차례로 녹음한다(v1.0.54 · 로이 「6·7번을 고르면 작동 안 한다」)
+    const q = selSents(capSel);
     setClipMenu(null); setClipCtx(null);
     if (playerOpen) stopPlayer();
-    const it = capSel.items[0];
-    setRecPanel({ ...recInfo(capSel.shortsNum, it.groupNum, it.sentIdx), st: 'idle', secs: 0, url: '', err: '', note: '' });
+    const it = q[0];
+    setRecPanel({ ...recInfo(capSel.shortsNum, it.groupNum, it.sentIdx), st: 'idle', secs: 0, url: '', err: '', note: '', queue: q.length > 1 ? q : null, qi: 0 });
     try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}   // 리본 단추에 초점이 남으면 Space 가 그 단추를 다시 누른다
   }
   async function recStart() {
@@ -6901,8 +6912,16 @@ export default function App() {
     return null;
   }
   function recGoNext(p, note) {
-    const l = recNextLine(p);
     recCleanup();
+    if (p.queue) {   // 고른 클립 차례 — 선택은 그대로 두고 커서만 옮긴다
+      const qi = (p.qi || 0) + 1; const nx = p.queue[qi];
+      if (!nx) { setRecPanel(null); setStatus((note ? note + ' — ' : '🎤 ') + `고른 클립 ${p.queue.length}개를 다 돌았습니다`); return; }
+      const l = lineOfSent(p.sn, nx.groupNum, nx.sentIdx);
+      if (l) { userCursor({ shortsNum: p.sn, n: l.n }); setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0); }
+      setRecPanel({ ...recInfo(p.sn, nx.groupNum, nx.sentIdx), st: 'idle', secs: 0, url: '', err: '', note: note || '', queue: p.queue, qi });
+      return;
+    }
+    const l = recNextLine(p);
     if (!l) { setRecPanel(null); setStatus(note ? note + ' — 마지막 클립입니다' : '🎤 마지막 클립입니다'); return; }
     userCursor({ shortsNum: p.sn, n: l.n });
     setCapSel({ shortsNum: p.sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n });
@@ -6919,7 +6938,7 @@ export default function App() {
       const o = await api.clipVoiceOverwrite({ shortsNum: p.sn, items: [{ groupNum: p.groupNum, sentIdx: p.sentIdx }], path: sv.path, fromMic: true });
       if (o && o.dto) setDto(o.dto);
       if (!(o && o.ok)) { setRecPanel({ ...p, st: 'done', err: (o && o.error) || '덮어쓰지 못했습니다' }); return; }
-      const msg = `🎤 컷${p.num} 내 녹음으로 덮어씀 (${o.dur.toFixed(1)}초${o.trimmed > 0.05 ? ` · 앞뒤 무음 ${o.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)`;
+      const msg = `🎤 ${p.lbl} 내 녹음으로 덮어씀 (${o.dur.toFixed(1)}초${o.trimmed > 0.05 ? ` · 앞뒤 무음 ${o.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)`;
       setStatus(msg);
       if (goNext) recGoNext(p, msg); else recClose();
     } catch (e) { setRecPanel({ ...p, st: 'done', err: e.message }); }
@@ -6950,26 +6969,28 @@ export default function App() {
   function lineOfSent(sn, groupNum, sentIdx) { const PL = linesMap.get(sn); return PL ? PL.list.find((x) => x.groupNum === groupNum && x.sentIdx === sentIdx) || null : null; }
   async function openPhone() {
     if (!clipSelOk()) { setStatus('📱 핸드폰 녹음을 넣을 클립을 먼저 고르세요'); return; }
-    const uniq = new Set(capSel.items.map((x) => x.groupNum + ':' + x.sentIdx));
-    if (uniq.size !== 1) { setStatus('📱 클립 하나를 고르세요(받은 녹음 한 개 = 문장 한 개)'); return; }
+    // 여러 클립(문장)을 골랐으면 그 문장들만 차례로 받는다(v1.0.54)
+    const q = selSents(capSel);
     setClipMenu(null); setClipCtx(null);
-    const it = capSel.items[0]; const sn = capSel.shortsNum;
-    setPhonePanel({ sn, urls: [], qr: '', target: null, auto: true, got: [], err: '', busy: true });
+    const it = q[0]; const sn = capSel.shortsNum;
+    setPhonePanel({ sn, urls: [], qr: '', target: null, auto: true, got: [], err: '', busy: true, queue: null });
     try {
-      const r = await api.phoneRecvStart({ shortsNum: sn, groupNum: it.groupNum, sentIdx: it.sentIdx, autoNext: true });
+      const r = await api.phoneRecvStart({ shortsNum: sn, groupNum: it.groupNum, sentIdx: it.sentIdx, items: q, autoNext: true });
       if (!r || !r.ok) { setPhonePanel((p) => (p ? { ...p, busy: false, err: (r && r.error) || '열지 못했습니다' } : p)); return; }
-      setPhonePanel((p) => (p ? { ...p, busy: false, urls: r.urls, qr: r.qrSvg, target: r.target } : p));
+      setPhonePanel((p) => (p ? { ...p, busy: false, urls: r.urls, qr: r.qrSvg, target: r.target, queue: r.queue || null } : p));
     } catch (e) { setPhonePanel((p) => (p ? { ...p, busy: false, err: e.message } : p)); }
   }
   async function phoneClose() { setPhonePanel(null); try { await api.phoneRecvStop(); } catch (_) {} }
   async function phoneMove(dir) {
     const p = phonePanel; if (!p || !p.target) return;
     const PL = linesMap.get(p.sn); if (!PL) return;
-    const keys = []; for (const x of PL.list) { const k = x.groupNum + ':' + x.sentIdx; if (!keys.length || keys[keys.length - 1].k !== k) keys.push({ k, l: x }); }
+    const keys = [];
+    if (p.queue) for (const x of p.queue) { const l = lineOfSent(p.sn, x.groupNum, x.sentIdx); if (l) keys.push({ k: x.groupNum + ':' + x.sentIdx, l }); }   // 고른 클립 안에서만
+    else for (const x of PL.list) { const k = x.groupNum + ':' + x.sentIdx; if (!keys.length || keys[keys.length - 1].k !== k) keys.push({ k, l: x }); }
     const i = keys.findIndex((x) => x.k === p.target.groupNum + ':' + p.target.sentIdx); const nx = keys[i + dir];
     if (i < 0 || !nx) return;
     const r = await api.phoneRecvTarget({ shortsNum: p.sn, groupNum: nx.l.groupNum, sentIdx: nx.l.sentIdx });
-    if (r && r.ok) { setPhonePanel((q) => (q ? { ...q, target: r.target, err: '' } : q)); selectClipLine(p.sn, nx.l); }
+    if (r && r.ok) { setPhonePanel((q) => (q ? { ...q, target: r.target, err: '' } : q)); if (p.queue) userCursor({ shortsNum: p.sn, n: nx.l.n }); else selectClipLine(p.sn, nx.l); }
   }
   async function phoneSetAuto(v) {
     const p = phonePanel; if (!p) return; setPhonePanel({ ...p, auto: v });
@@ -6980,23 +7001,29 @@ export default function App() {
     if (!d) return;
     if (d.closed) { setPhonePanel(null); setStatus('📱 30분 동안 쓰지 않아 핸드폰 받기를 닫았습니다'); return; }
     if (d.dto) setDto(d.dto);
-    const msg = `📱 컷${d.num} 핸드폰 녹음을 넣었습니다 (${Number(d.dur || 0).toFixed(1)}초${d.trimmed > 0.05 ? ` · 앞뒤 무음 ${d.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)${d.last ? ' — 마지막 클립입니다' : ''}`;
+    const glbl = phonePanel && d.got ? clipLabel(phonePanel.sn, d.got.groupNum, d.got.sentIdx) : '클립';
+    const msg = `📱 ${glbl} 핸드폰 녹음을 넣었습니다 (${Number(d.dur || 0).toFixed(1)}초${d.trimmed > 0.05 ? ` · 앞뒤 무음 ${d.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)${d.last ? (phonePanel && phonePanel.queue ? ' — 고른 클립을 모두 받았습니다' : ' — 마지막 클립입니다') : ''}`;
     setStatus(msg);
-    setPhonePanel((p) => (p ? { ...p, target: d.target || p.target, got: [...p.got, `컷${d.num} · ${Number(d.dur || 0).toFixed(1)}초`].slice(-30), err: '' } : p));
-    if (d.target) { const sn = phonePanel ? phonePanel.sn : null; const l = sn != null ? lineOfSent(sn, d.target.groupNum, d.target.sentIdx) : null; if (l) selectClipLine(sn, l); }
+    setPhonePanel((p) => (p ? { ...p, target: d.target || p.target, got: [...p.got, `${glbl} · ${Number(d.dur || 0).toFixed(1)}초`].slice(-30), err: '' } : p));
+    if (d.target) { const sn = phonePanel ? phonePanel.sn : null; const l = sn != null ? lineOfSent(sn, d.target.groupNum, d.target.sentIdx) : null; if (l) { if (phonePanel.queue) userCursor({ shortsNum: sn, n: l.n }); else selectClipLine(sn, l); } }
   };
   useEffect(() => (api.onPhoneRecvGot ? api.onPhoneRecvGot((d) => phoneGotRef.current && phoneGotRef.current(d)) : undefined), []);   // eslint-disable-line react-hooks/exhaustive-deps
   // 🎙 음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음으로(clear = 해제). 파일 고르기는 main 이 연다
   async function clipVoiceOverwrite(clear) {
     setClipMenu(null); setClipCtx(null);
     if (!clipSelOk()) { setStatus('🎙 클립을 먼저 고르세요'); return; }
-    const sn = capSel.shortsNum; const items = []; const seen = new Set();
-    for (const it of capSel.items) { const k = it.groupNum + ':' + it.sentIdx; if (!seen.has(k)) { seen.add(k); items.push({ groupNum: it.groupNum, sentIdx: it.sentIdx }); } }
+    const sn = capSel.shortsNum; const items = selSents(capSel);
     try {
+      // 여러 클립(v1.0.54): 파일을 클립 수만큼 고르면 이름 순서대로 · 파일 하나면 문장 사이 쉼에서 나눠 넣는다(main)
       const r = await api.clipVoiceOverwrite({ shortsNum: sn, items, clear: !!clear });
       if (r && r.dto) setDto(r.dto);
       if (r && r.canceled) return;
-      setStatus(r && r.ok ? (clear ? `🎙 덮어쓴 음성 ${r.cleared}개 해제 — 음성 단계가 다시 채웁니다 (Ctrl+Z 되돌리기)` : `🎙 내 녹음으로 덮어썼습니다 (${r.dur.toFixed(1)}초 · Ctrl+Z 되돌리기)`) : '⚠ ' + ((r && r.error) || '음성 덮어쓰기 실패'));
+      if (!(r && r.ok)) { const m = (r && r.error) || '음성 덮어쓰기 실패'; setStatus('⚠ ' + m); if (!clear) uiAlert('🎙 녹음 파일 넣기\n\n' + m); return; }
+      const fails = (r.failed && r.failed.length) ? ` · ⚠ 못 넣음 ${r.failed.join(' / ')}` : '';
+      setStatus(clear ? `🎙 덮어쓴 음성 ${r.cleared}개 해제 — 음성 단계가 다시 채웁니다 (Ctrl+Z 되돌리기)`
+        : (r.n > 1 ? `🎙 클립 ${r.n}개에 내 녹음을 넣었습니다${r.split ? ` — 녹음 하나를 쉼 ${r.split.length}곳에서 나눔(들어 보고 어긋나면 Ctrl+Z)` : ' — 파일 이름 순서대로'} (Ctrl+Z 한 번에 모두 되돌림)${fails}`
+          : `🎙 내 녹음으로 덮어썼습니다 (${r.dur.toFixed(1)}초 · Ctrl+Z 되돌리기)`));
+      if (fails) uiAlert('🎙 녹음 파일 넣기 — 일부를 넣지 못했습니다\n\n' + r.failed.join('\n'));
     } catch (e) { logline('음성 덮어쓰기 오류: ' + e.message); setStatus('⚠ ' + e.message); }
   }
   async function clipMarker(mode) {
@@ -7450,7 +7477,7 @@ export default function App() {
           </div>}
           {recPanel && <div className="vr-menu-bg" onMouseDown={() => { if (recPanel.st !== 'rec' && recPanel.st !== 'busy') recClose(); }} />}
           {recPanel && <div className="vr-menu zr-panel rec-panel" data-testid="rec-panel" onMouseDown={(e) => e.stopPropagation()}>
-            <b>🎤 녹음해서 덮어쓰기 · 컷{recPanel.num}{recPanel.own ? ' · 🎙 이미 내 녹음' : ''}</b>
+            <b>🎤 녹음해서 덮어쓰기 · {recPanel.lbl}{recPanel.queue ? ` (${recPanel.qi + 1}/${recPanel.queue.length})` : ''}{recPanel.own ? ' · 🎙 이미 내 녹음' : ''}</b>
             <div className="rec-text" data-testid="rec-text">{recPanel.text || '(글 없음)'}</div>
             <div className="rec-row">
               {recPanel.st === 'rec'
@@ -7463,7 +7490,7 @@ export default function App() {
             {recPanel.err && <span className="meta rec-err" data-testid="rec-err">⚠ {recPanel.err}</span>}
             {recPanel.note && !recPanel.err && <span className="meta" data-testid="rec-note">{recPanel.note}</span>}
             <div className="zr-btns">
-              <button data-testid="rec-apply-next" disabled={recPanel.st !== 'done'} title="Enter" onClick={() => recApply(true)}>덮어쓰고 다음 클립 ▶</button>
+              <button data-testid="rec-apply-next" disabled={recPanel.st !== 'done'} title="Enter" onClick={() => recApply(true)}>{recPanel.queue && recPanel.qi + 1 >= recPanel.queue.length ? '덮어쓰고 마치기 ✔' : '덮어쓰고 다음 클립 ▶'}</button>
               <button className="ghost" data-testid="rec-apply" disabled={recPanel.st !== 'done'} onClick={() => recApply(false)}>덮어쓰고 닫기</button>
               <button className="ghost" data-testid="rec-skip" disabled={recPanel.st === 'rec' || recPanel.st === 'busy'} title="이 클립은 그대로 두고 다음 클립으로" onClick={() => recGoNext(recPanel, '')}>건너뛰기 ▷</button>
               <button className="ghost" data-testid="rec-close" disabled={recPanel.st === 'busy'} title="Esc" onClick={recClose}>닫기</button>
@@ -7485,7 +7512,7 @@ export default function App() {
               </div>
             </div>}
             {phonePanel.target && <>
-              <span className="meta" data-testid="phone-target">지금 넣을 클립: 컷{phonePanel.target.num}{phonePanel.target.own ? ' · 🎙 이미 내 녹음(새로 받으면 바뀝니다)' : ''}</span>
+              <span className="meta" data-testid="phone-target">지금 넣을 클립: {clipLabel(phonePanel.sn, phonePanel.target.groupNum, phonePanel.target.sentIdx)}{phonePanel.queue ? (() => { const i = phonePanel.queue.findIndex((x) => x.groupNum === phonePanel.target.groupNum && x.sentIdx === phonePanel.target.sentIdx); return ` (${i + 1}/${phonePanel.queue.length} · 고른 클립만)`; })() : ''}{phonePanel.target.own ? ' · 🎙 이미 내 녹음(새로 받으면 바뀝니다)' : ''}</span>
               <div className="rec-text" data-testid="phone-text">{phonePanel.target.text || '(글 없음)'}</div>
               <div className="rec-row">
                 <button className="ghost" data-testid="phone-prev" onClick={() => phoneMove(-1)}>◀ 이전 클립</button>
@@ -9612,12 +9639,15 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
                                 {/* 📜 Vrew 모양 — 왼쪽 레인 열(삽입 그림 썸네일 아래)에 카드 자리 · 이 줄에서 시작하는 삽입 그림이 있으면 그 아래로 */}
                                 {vrewLay && cardMark ? <span className={'card-slot' + (onInsMark && insMarksAt(pr, _pl && _pl.list, l.n).length ? ' below' : '')}>{cardMark}</span> : null}
                                 {/* ↕ 번호 칸을 잡고 끌면 클립 옮기기(체크한 클립 모두 · 체크 안 했으면 이 클립 하나) — 다른 클립의 위·아래 절반에 놓는다 */}
-                                <div className="clip-no cf-lineno" title={'이 클립 선택 — Shift 범위 · Ctrl 더하기/빼기 · Ctrl+A 전체' + (onClipMove ? '\n↕ 끌어서 옮기기 — 체크한 클립 모두(체크 안 했으면 이 클립) · 다른 그룹에 놓으면 그 그룹 그림·영상' : '')}
+                                <div className="clip-no cf-lineno" title={'누르면 이 클립 체크/해제(체크박스와 같음) — Shift 범위 · Ctrl+A 전체' + (onClipMove ? '\n↕ 끌어서 옮기기 — 체크한 클립 모두(체크 안 했으면 이 클립) · 다른 그룹에 놓으면 그 그룹 그림·영상' : '')}
                                   draggable={!!onClipMove && !lineEd}
                                   onDragStart={onClipMove ? (ev) => { ev.stopPropagation(); if (!_S.onClipMove('start', pr.shortsNum, _S.nAt(ev.currentTarget) || l.n, ev)) { ev.preventDefault(); return; } try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/x-pm-clip', String(l.n)); const row = ev.currentTarget.closest('.sent.clip'); if (row) ev.dataTransfer.setDragImage(row, 20, 16); } catch (_) {} } : undefined}
                                   onDragEnd={onClipMove ? () => _S.onClipMove('end') : undefined}
                                   onMouseDown={(ev) => { if (ev.shiftKey || ev.ctrlKey || ev.metaKey) ev.preventDefault(); }}
-                                  onClick={(ev) => { ev.stopPropagation(); if (onPickCapLine) _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, ev, _S.projLinesOf(pr.shortsNum)); }}>
+                                  onClick={(ev) => { ev.stopPropagation(); if (!onPickCapLine) return;
+                                    // ☑ 번호 칸(노랑·파랑 칸) 어디를 눌러도 체크박스와 같다(v1.0.54 · 로이 「주변을 누르면 체크가 풀린다」) — Shift = 범위 · Ctrl = 더하기/빼기는 예전대로
+                                    const plain = !(ev.shiftKey || ev.ctrlKey || ev.metaKey);
+                                    _S.onPickCapLine(pr.shortsNum, _S.infoAt(pr.shortsNum, ev.currentTarget) || info, plain ? { ctrlKey: true, shiftKey: false, chk: true } : ev, _S.projLinesOf(pr.shortsNum)); }}>
                                   <span className="clip-no-n">{l.n}</span>
                                   {/* ☑ 번호 밑 체크박스(v0.7.32 · Vrew) — 누를 때마다 이 클립을 선택에 더하고/뺀다(Ctrl+클릭과 같다) */}
                                   <input type="checkbox" className="clip-chk" data-testid="clip-chk" checked={!!picked && !!capSel.chk} title="이 클립 체크 — 여러 개를 골라 합치기·삭제·복사"
