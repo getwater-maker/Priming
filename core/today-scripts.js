@@ -8,6 +8,7 @@
  *   - 폴더는 채널 「대본 폴더」(scriptFolder) 아래를 3단계까지 — `_`·`.` 로 시작하는 폴더(`_폐기` 등)는 건너뛴다.
  *   - 「만들었다」 판정은 부르는 쪽(main)이 넘긴다(.vrew · 같은 이름 MP4 · 업로드 기록) — 이 파일은 fs 읽기만.
  *   - 같은 채널에 가장 이른 날짜 대본이 여럿이면 그날 것은 모두 고른다.
+ *   - 📦 항목마다 `pack`(packagingStatus) — 패키징이 미완이면 화면은 보여만 주고 큐에 넣지 않는다(main open-scripts-list 도 다시 막는다 · v1.0.55).
  * 테스트: test/today-scripts.test.js
  */
 const fs = require('fs');
@@ -85,7 +86,7 @@ function pickNext(files, today, isMade) {
 /**
  * 채널들 → 오늘 작업할 대본 목록.
  * channels: [{name, folder}] · isMade(file, channelName) → bool
- * → { today, items:[{channel, path, name, date, waiting, madeAhead}], empty:[{channel, reason}] }
+ * → { today, items:[{channel, path, name, date, waiting, madeAhead, pack}], empty:[{channel, reason}] }
  */
 function findToday(channels, isMade, today = kstToday()) {
   const items = [], empty = [];
@@ -94,9 +95,31 @@ function findToday(channels, isMade, today = kstToday()) {
     const files = scanFolder(ch.folder, today);
     const r = pickNext(files, today, (f) => !!isMade(f, ch.name));
     if (!r.picks.length) { empty.push({ channel: ch.name, reason: r.madeAhead ? `앞으로 ${r.madeAhead}편 모두 만듦` : '오늘 이후 대본 없음' }); continue; }
-    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, waiting: r.waiting, madeAhead: r.madeAhead });
+    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, waiting: r.waiting, madeAhead: r.madeAhead, pack: packagingStatus(f.path) });
   }
   return { today, items, empty };
 }
 
-module.exports = { kstToday, dateOf, scanFolder, pickNext, findToday };
+/**
+ * 📦 패키징 완료 판정(v1.0.55 · 로이 2026-11-17 「반드시 패키징 작업까지 완료된 것이 작업큐에 들어갈 수 있도록」) — 한 곳.
+ *   패키징 파일 = core/yt-packaging.findPackagingFile(업로드가 읽는 그 파일) ·
+ *   완료 = 업로드·썸네일이 쓰는 다섯 칸이 모두 채워짐: 제목 · 설명글 · 태그 · 고정댓글 · 썸네일 문구 A.
+ *   (채널사업부는 제목·썸네일 문구를 대본 전에, 설명글·태그·고정댓글을 대본 뒤에 쓴다 — 앞쪽만 있으면 미완이다)
+ *   fail-closed: 파일을 못 읽으면 미완.
+ * → { ok, path|null, missing:[칸 이름] }
+ */
+const PACK_FIELDS = ['제목', '설명글', '태그', '고정댓글', '썸네일 문구 A'];
+function packagingStatus(scriptPath) {
+  const YP = require('./yt-packaging');
+  const pf = YP.findPackagingFile(scriptPath);
+  if (!pf) return { ok: false, path: null, missing: ['패키징 파일'] };
+  let text;
+  try { text = fs.readFileSync(pf, 'utf8'); } catch (_) { return { ok: false, path: pf, missing: ['패키징 파일 읽기'] }; }
+  const k = YP.parsePackaging(text);
+  const th = require('./thumb-edit').parseThumbText(text);
+  const have = { '제목': !!k.title, '설명글': !!k.description, '태그': k.tags.length > 0, '고정댓글': !!k.pinned, '썸네일 문구 A': !!(th.A && th.A.length) };
+  const missing = PACK_FIELDS.filter((f) => !have[f]);
+  return { ok: !missing.length, path: pf, missing };
+}
+
+module.exports = { kstToday, dateOf, scanFolder, pickNext, findToday, packagingStatus, PACK_FIELDS };

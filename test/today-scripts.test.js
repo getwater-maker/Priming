@@ -71,5 +71,33 @@ ok(/data-testid="today-scripts"/.test(APP), '렌더러 📅 버튼');
 // 여러 채널을 한 번에 여는 경로는 항목마다 자기 채널을 박는다(헤더 채널로 덮지 않는다)
 ok(/open-scripts-list[\s\S]{0,1500}_channelItemSettings\(/.test(MAIN), 'open-scripts-list: 항목마다 그 채널 설정');
 
+// [5] 📦 패키징 완료 판정(v1.0.55) — 패키징 파일 + 제목·설명글·태그·고정댓글·썸네일 문구 A
+const root5 = fs.mkdtempSync(path.join(os.tmpdir(), 'today-pack-'));
+try {
+  const ch = path.join(root5, '채널');
+  const sp = (n) => { const p = path.join(ch, '대본', '2026_11', n + '.md'); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, '# x\n'); return p; };
+  const pk = (n, body) => { const p = path.join(ch, '패키징', '2026_11', n + '.md'); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); return p; };
+  const FULL = '# t\n\n## 제목\n좋은 제목\n\n## 썸네일 문구 A\n| 줄 | 색 |\n|---|---|\n| 첫 줄 | 흰색 |\n\n## 설명글\n```\n설명입니다\n```\n\n## 태그\n```\n가, 나\n```\n\n## 고정댓글\n```\n댓글\n```\n';
+  const a = sp('[테스_1120] 완료'); pk('[테스_1120] 완료', FULL);
+  let s = T.packagingStatus(a);
+  ok(s.ok && !s.missing.length && /패키징/.test(s.path), '다섯 칸이 다 있으면 완료 — ' + JSON.stringify(s.missing));
+  const b = sp('[테스_1121] 앞쪽만'); pk('[테스_1121] 앞쪽만', '# t\n\n## 제목\n제목\n\n## 썸네일 문구 A\n첫 줄\n');
+  s = T.packagingStatus(b);
+  ok(!s.ok && s.missing.join() === '설명글,태그,고정댓글', '대본 전 단계(제목·썸네일만)는 미완 — ' + s.missing);
+  const c = sp('[테스_1122] 없음');
+  s = T.packagingStatus(c);
+  ok(!s.ok && s.path === null && s.missing[0] === '패키징 파일', '패키징 파일 없음 = 미완');
+  const d = sp('[테스_1123] 빈칸'); pk('[테스_1123] 빈칸', FULL.replace('```\n댓글\n```', '```\n```'));
+  ok(T.packagingStatus(d).missing.join() === '고정댓글', '빈 고정댓글 = 미완(판정력)');
+  const e = sp('[테스_1124] 썸네일없음'); pk('[테스_1124] 썸네일없음', FULL.replace(/## 썸네일 문구 A[\s\S]*?(?=## 설명글)/, ''));
+  ok(T.packagingStatus(e).missing.join() === '썸네일 문구 A', '썸네일 문구 A 없음 = 미완');
+  const res = T.findToday([{ name: '테스', folder: path.join(ch, '대본') }], () => false, '2026-11-20');
+  ok(res.items.length === 1 && res.items[0].pack && res.items[0].pack.ok === true, 'findToday 항목에 pack 이 실린다');
+} finally { fs.rmSync(root5, { recursive: true, force: true }); }
+// 연결 — main 이 큐에 넣기 전에 다시 막는다 · 화면은 pack.ok 로만 고르게 한다(다시 판정하지 않음)
+ok(/open-scripts-list[\s\S]{0,900}packagingStatus\(x\.path\)[\s\S]{0,200}if \(!pk\.ok\)[^\n]*continue/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다');
+ok(/const todayPackOk = \(x\) => !!\(x && x\.pack && x\.pack\.ok\)/.test(APP) && /disabled=\{!pk\}/.test(APP) && /tp\.sel\[x\.path\] && todayPackOk\(x\)/.test(APP), '화면: 미완은 고를 수 없고 넣을 때도 거른다');
+ok(!/packagingStatus|findPackagingFile/.test(APP), '화면이 패키징을 따로 판정하지 않는다');
+
 console.log(`today-scripts: ${pass} 통과 · ${fail} 실패`);
 process.exit(fail ? 1 : 0);

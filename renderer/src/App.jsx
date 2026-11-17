@@ -1340,16 +1340,18 @@ export default function App() {
     if (s.outTarget != null) setOutTarget(normOutTargetUi(s.outTarget));
   }
   // 📅 오늘 작업할 대본(v0.9.85) — main 이 채널마다 다음 편을 찾아 주면 골라서 큐에 넣는다. 항목마다 자기 채널(헤더 채널로 덮지 않는다).
+  //   📦 패키징 미완(x.pack.ok 거짓)은 보여만 주고 고를 수 없다(v1.0.55 · 판정은 main 의 core/today-scripts 한 곳 — 여기서 다시 판정하지 않는다)
+  const todayPackOk = (x) => !!(x && x.pack && x.pack.ok);
   async function openTodayScripts() {
     setTodayPick({ loading: true });
     try {
       const r = await api.todayScriptsScan();
-      setTodayPick({ ...r, sel: Object.fromEntries((r.items || []).map((x) => [x.path, !x.inQueue])) });
+      setTodayPick({ ...r, sel: Object.fromEntries((r.items || []).map((x) => [x.path, !x.inQueue && todayPackOk(x)])) });
     } catch (e) { setTodayPick(null); logline('오늘 대본 찾기 오류: ' + e.message); }
   }
   async function addTodayScripts() {
     const tp = todayPick; setTodayPick(null);
-    const items = ((tp && tp.items) || []).filter((x) => tp.sel[x.path]).map((x) => ({ path: x.path, presetName: x.channel }));
+    const items = ((tp && tp.items) || []).filter((x) => tp.sel[x.path] && todayPackOk(x)).map((x) => ({ path: x.path, presetName: x.channel }));
     if (!items.length) return;
     const r = await api.openScriptsList(items);
     if (!r) { setStatus('오늘 대본을 열지 못했습니다 — 로그를 보세요'); return; }
@@ -6282,7 +6284,7 @@ export default function App() {
   // 🧭 메뉴 줄(Vrew 12탭 · Lab) — 옛 리본 블록을 조각으로 잘라 새 탭에 다시 끼운 것. 기능·testid 는 그대로(대조표 docs/VrewLab/리본_선택자_대조표.md)
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
-            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다 · 📦 패키징(제목·설명글·태그·고정댓글·썸네일 문구 A)이 끝난 대본만 넣을 수 있습니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
             {!compact && ribReaderBtn}
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
@@ -8426,23 +8428,27 @@ export default function App() {
             </div>
             {todayPick.loading ? <div className="today-empty">채널 대본 폴더를 찾는 중…</div> : (<>
               <div className="today-sub">
-                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path]).length} / {(todayPick.items || []).length}편 선택</span>
-                {(todayPick.items || []).length > 0 && (() => {
-                  const all = (todayPick.items || []).every((x) => todayPick.sel[x.path]);
-                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
+                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path]).length} / {(todayPick.items || []).filter(todayPackOk).length}편 선택{(todayPick.items || []).some((x) => !todayPackOk(x)) && <span className="today-unpk-n"> · 📦 패키징 미완 {(todayPick.items || []).filter((x) => !todayPackOk(x)).length}편</span>}</span>
+                {(todayPick.items || []).some(todayPackOk) && (() => {
+                  const ready = (todayPick.items || []).filter(todayPackOk);
+                  const all = ready.every((x) => todayPick.sel[x.path]);
+                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, todayPackOk(x) && !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
                 })()}
               </div>
               <div className="today-list">
                 {!(todayPick.items || []).length && <div className="today-empty">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
                 {(todayPick.items || []).map((x) => {
-                  const on = !!todayPick.sel[x.path];
+                  const pk = todayPackOk(x);
+                  const on = pk && !!todayPick.sel[x.path];
+                  const miss = (x.pack && x.pack.missing) || ['패키징 파일'];
                   return (
-                    <label key={x.path} className={`today-row${on ? ' on' : ''}`} title={x.path}>
-                      <input type="checkbox" checked={on} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
+                    <label key={x.path} className={`today-row${on ? ' on' : ''}${pk ? '' : ' unpk'}`} data-pack={pk ? 'ok' : 'missing'} title={pk ? x.path : `${x.path}
+📦 패키징이 끝나야 큐에 넣을 수 있습니다 — 빠진 것: ${miss.join(' · ')}`}>
+                      <input type="checkbox" checked={on} disabled={!pk} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
                       <span className="today-ch">{x.channel}</span>
                       <span className="today-md">{x.date.slice(5).replace('-', '')}</span>
                       <span className="today-name">{x.name}</span>
-                      {x.inQueue ? <span className="today-tag q">이미 큐에 있음</span> : x.waiting ? <span className="today-tag">뒤로 {x.waiting}편</span> : null}
+                      {!pk ? <span className="today-tag unpk">📦 패키징 미완 · {miss.join('·')}</span> : x.inQueue ? <span className="today-tag q">이미 큐에 있음</span> : x.waiting ? <span className="today-tag">뒤로 {x.waiting}편</span> : null}
                     </label>
                   );
                 })}
@@ -8456,7 +8462,7 @@ export default function App() {
             </>)}
             <div className="modal-actions today-actions">
               <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
-              <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path])} onClick={addTodayScripts}>작업큐에 넣기</button>
+              <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path] && todayPackOk(x))} onClick={addTodayScripts}>작업큐에 넣기</button>
             </div>
           </div>
         </div>
