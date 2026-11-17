@@ -1,7 +1,7 @@
 {
   "name": "priming",
   "productName": "Priming",
-  "version": "1.0.50",
+  "version": "1.0.51",
   "description": "롱폼(16:9) 영상 제작 — 대본(.md) → TTS → 이미지/영상 → Vrew(.vrew) 자동 제작 + 출판(POD) PDF",
   "main": "bootstrap.js",
   "author": "getwater",
@@ -65,6 +65,7 @@
     "test:fxvid": "node test/fx-video.test.js",
     "test:fxtrans": "node test/fx-trans.test.js && node test/fx-trans-ui.smoke.js",
     "test:voiceow": "node test/voice-overwrite.smoke.js",
+    "test:record": "node test/record.smoke.js",
     "test:aisub": "node test/ai-subtitle.test.js && node test/ai-subtitle-ui.smoke.js",
     "test:stageord": "node test/stage-order-paste.smoke.js",
     "test:textins": "node test/text-insert.smoke.js",

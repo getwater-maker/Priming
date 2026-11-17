@@ -8,7 +8,7 @@
   --brown:#7a4b00; --gold:#ffd770; --ok-d:#2e7d32; --blue:#2563eb;
   --font:"Pretendard","Malgun Gothic",sans-serif;
   --r-sm:6px; --r-md:8px; --r-lg:10px;
-  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px;
+  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:14px; --fs-read:20px;
 }
 /* 다크(Vrew 캡처 근사) — 라이트로 되돌리기: index.html 의 data-theme 를 light 로(또는 localStorage 'priming-theme'='light') */
 :root[data-theme="dark"],:root[data-theme="purple"]{
@@ -2196,3 +2196,13 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .menubar .findbar input{min-width:28px}
 /* v1.0.6 — 출판 모드처럼 단추가 더 붙는 화면에서도 오른쪽이 잘리지 않게: 한 줄에 다 안 들어가면 다음 줄로 내린다(들어가면 예전과 같은 한 줄) */
 @media (min-width:1367px){.menubar{flex-wrap:wrap;row-gap:4px}}
+
+/* 🎤 녹음 창(v1.0.51) — 읽을 문장을 크게 · 소리 크기 막대 */
+.rec-panel{width:min(560px,92vw)}
+.rec-text{font-size:var(--fs-read);line-height:1.55;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-md,8px);background:var(--card);max-height:180px;overflow:auto;white-space:pre-wrap;word-break:keep-all}
+.rec-row{display:flex;align-items:center;gap:10px}
+.rec-dot{color:var(--danger);font-weight:700;animation:recblink 1s infinite}
+@keyframes recblink{50%{opacity:.3}}
+.rec-meter{flex:1;height:8px;border-radius:4px;background:var(--line);overflow:hidden}
+.rec-meter > span{display:block;height:100%;width:0%;background:var(--sky);transition:width .06s linear}
+.rec-panel audio{width:100%}

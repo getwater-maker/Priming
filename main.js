@@ -11603,6 +11603,21 @@ ipcMain.handle('clip-pad', async (_e, args = {}) => {
   storeActive(); syncSnapshotNow(); pushDtoUpdate();
   return { ok: true, sec: next, prev: cur, dto: P.toDTO(S.parsed) };
 });
+// 🎤 마이크 녹음 저장(v1.0.51 · 로이 2026-11-17 되살림) — 화면 MediaRecorder 가 만든 소리(webm/ogg/wav)를 임시 폴더에 쓰고 경로를 돌려준다.
+//   그 뒤 화면이 clip-voice-overwrite(path, fromMic)로 문장 음성을 바꾼다 · 300MB 넘으면 거부 · 소리 머리(WebM·Ogg·RIFF)가 아니면 거부
+ipcMain.handle('rec-save', (_e, args = {}) => {
+  const b = args.bytes ? Buffer.from(args.bytes) : null;
+  if (!b || b.length < 100) return { ok: false, error: '녹음된 소리가 없습니다' };
+  if (b.length > 300 * 1048576) return { ok: false, error: '녹음이 너무 깁니다(300MB 넘음)' };
+  const head = b.slice(0, 4).toString('latin1');
+  const webm = b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3;
+  if (!webm && head !== 'OggS' && head !== 'RIFF') return { ok: false, error: '소리 데이터가 아닙니다' };
+  const dir = path.join(require('os').tmpdir(), 'priming-rec');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const fp = path.join(dir, `rec_${Date.now()}.${head === 'RIFF' ? 'wav' : head === 'OggS' ? 'ogg' : 'webm'}`);
+  try { fs.writeFileSync(fp, b); } catch (e) { return { ok: false, error: e.message }; }
+  return { ok: true, path: fp, bytes: b.length };
+});
 // 🎙 음성 덮어쓰기(Lab · Vrew 「음성 덮어쓰기」) — 고른 **한 문장**의 음성을 내가 가진 녹음 파일로 바꾼다.
 //   args = { shortsNum, items:[{groupNum, sentIdx}], path?(시험 · 없으면 파일 고르기), clear?(true = 덮어쓰기 해제) }
 //   녹음은 24kHz 모노 WAV 새 파일(`<번호>_o<지문>.wav` — Ctrl+Z 가 옛 소리로)로 바꿔 tts-N 에 두고 원본 녹음은 그대로 둔다 ·
@@ -11636,18 +11651,21 @@ ipcMain.handle('clip-voice-overwrite', async (_e, args = {}) => {
   const hash = require('crypto').createHash('sha1').update(src + '|' + st.size + '|' + Math.round(st.mtimeMs)).digest('hex').slice(0, 8);
   const dir = shortsDirs(S.outRoot, pr.shortsNum).tts;
   const out = path.join(dir, `${s.num}_o${hash}.wav`);
-  const okc = await new Promise((resolve) => {
-    const p = require('child_process').spawn(ff, ['-y', '-hide_banner', '-loglevel', 'error', '-i', src, '-vn', '-ar', '24000', '-ac', '1', '-codec:a', 'pcm_s16le', out], { windowsHide: true, stdio: 'ignore' });
-    p.on('error', () => resolve(false)); p.on('close', (code) => resolve(code === 0 && fs.existsSync(out)));
-  });
-  if (!okc) return { ok: false, error: '이 파일을 소리로 읽지 못했습니다', dto: P.toDTO(S.parsed) };
-  const dur = (fs.statSync(out).size - 44) / (24000 * 2);
-  if (!(dur > 0.05)) { try { fs.rmSync(out, { force: true }); } catch {} return { ok: false, error: '소리가 거의 없는 파일입니다', dto: P.toDTO(S.parsed) }; }
+  // 24kHz 모노로 읽고 → ✂ 앞뒤 무음만 자른다(녹음 버튼을 누른 뒤·끄기 전의 빈 소리 · 사이 쉼은 그대로 · 판정은 quiet-trim 한 곳) → WAV
+  const QT = require('./core/quiet-trim');
+  let pcm = await QT.decodePcm(src, ff);
+  if (!pcm || pcm.length < 24000 * 0.05) return { ok: false, error: pcm ? '소리가 거의 없는 파일입니다' : '이 파일을 소리로 읽지 못했습니다', dto: P.toDTO(S.parsed) };
+  let trimmed = 0;
+  if (args.trim !== false) { const t = QT.trimEdges(pcm, 24000); if (t) { pcm = t.pcm; trimmed = t.removedSec; } }
+  const dur = pcm.length / 24000;
+  try { fs.mkdirSync(dir, { recursive: true }); const tmp = out + '.tmp'; fs.writeFileSync(tmp, QT.wavOf(pcm, 24000)); fs.renameSync(tmp, out); }
+  catch (e) { return { ok: false, error: '녹음을 저장하지 못했습니다: ' + e.message, dto: P.toDTO(S.parsed) }; }
   undoPush('음성 덮어쓰기');
   s.ttsAudioPath = out; s.ttsDurationSec = dur; s.voiceOwn = true; wipe(s);
-  log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${path.basename(src)} (${dur.toFixed(1)}초)`);
+  log(`🎙 컷${s.num} 음성을 내 녹음으로 덮어씀 — ${args.fromMic ? '마이크 녹음' : path.basename(src)} (${dur.toFixed(1)}초${trimmed > 0.05 ? ` · 앞뒤 무음 ${trimmed.toFixed(1)}초 자름` : ''})`);
+  if (args.fromMic && path.dirname(src) === path.join(require('os').tmpdir(), 'priming-rec')) { try { fs.rmSync(src, { force: true }); } catch {} }   // 임시 녹음은 tts-N 에 옮겼으니 지운다
   storeActive(); syncSnapshotNow();
-  return { ok: true, dur, dto: P.toDTO(S.parsed) };
+  return { ok: true, dur, trimmed, dto: P.toDTO(S.parsed) };
 });
 // 🔇 기본 노이즈 줄이기(Lab · 남은 기능 ②) — 고른 클립이 든 문장의 소리에 ffmpeg afftdn 을 굽는다(s.denoise 0~3 · 0 = 끔).
 //   args = { shortsNum, items:[{groupNum, sentIdx}], level } · 음성 파일은 건드리지 않는다 — .vrew 를 만들 때 문장 MP3 사본에 구워진다(볼륨과 같은 길) · Ctrl+Z 한 번

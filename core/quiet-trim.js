@@ -100,6 +100,33 @@ function compactPcm(pcm, rate, { maxGap, edge, pad = 0 }) {
   return { pcm: out, cuts: cuts.length, removedSec: (total - outLen) / rate };
 }
 
+// ✂ 앞뒤 무음만 자르기(v1.0.51 · 내 녹음 덮어쓰기) — 녹음 단추를 누른 뒤·끄기 전의 빈 소리를 뺀다 → { pcm, removedSec } | null
+//   사이 쉼은 건드리지 않는다 · 정적 기준 = 말 대표음량 −40dB(compactPcm 과 같다) — 방 잡음이 그보다 크면 잡음 +6dB(말보다 15dB 이상 작을 때만)
+//   말 시작 = 50ms 넘게 이어진 소리(마우스 딸깍 한 번은 말로 치지 않는다) · 앞 0.15초 · 뒤 0.25초는 남긴다 · 판단이 안 서면 null(자르지 않음)
+const TRIM_LEAD = 0.15, TRIM_TAIL = 0.25, TRIM_MIN_RUN = 5;
+function trimEdges(pcm, rate) {
+  if (!pcm || pcm.length < rate * 0.3) return null;
+  const { dbs, n } = frameDbs(pcm, rate);
+  const sorted = dbs.slice().sort((a, b) => a - b);
+  const speech = sorted[Math.floor(sorted.length * 0.95)];   // 녹음은 앞뒤 빈 소리가 길 수 있어 compactPcm(90%)보다 위에서 잰다
+  if (!(speech >= ABS_FLOOR_DB)) return null;
+  const noise = sorted[Math.floor(sorted.length * 0.1)];
+  let thr = speech - GAP_DROP_DB;
+  if (noise + 6 > thr) { if (noise + 6 > speech - 15) return null; thr = noise + 6; }
+  const loud = dbs.map((d) => d > thr);
+  const runAt = (i, dir) => { let k = 0; for (let j = i; j >= 0 && j < loud.length && loud[j]; j += dir) k++; return k; };
+  let a = -1; for (let i = 0; i < loud.length; i++) if (loud[i] && runAt(i, 1) >= TRIM_MIN_RUN) { a = i; break; }
+  let b = -1; for (let i = loud.length - 1; i >= 0; i--) if (loud[i] && runAt(i, -1) >= TRIM_MIN_RUN) { b = i; break; }
+  if (a < 0 || b < a) return null;
+  const s = Math.max(0, a * n - Math.round(TRIM_LEAD * rate));
+  const e = Math.min(pcm.length, (b + 1) * n + Math.round(TRIM_TAIL * rate));
+  if ((s + (pcm.length - e)) < rate * 0.05) return null;            // 자를 것이 거의 없다
+  const out = new Int16Array(pcm.subarray(s, e));
+  const xf = Math.min(Math.round(rate * XFADE_MS / 1000), Math.floor(out.length / 2));
+  for (let k = 0; k < xf; k++) { if (s > 0) out[k] = Math.round(out[k] * (k / xf)); if (e < pcm.length) out[out.length - 1 - k] = Math.round(out[out.length - 1 - k] * (k / xf)); }
+  return { pcm: out, removedSec: (pcm.length - out.length) / rate };
+}
+
 function wavOf(pcm, rate) {
   const data = Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength);
   const h = Buffer.alloc(44);
@@ -219,4 +246,4 @@ async function ensureSentences(sentences, preset, ttsDir, opts = {}) {
   return r;
 }
 
-module.exports = { effPreset, keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, wavOf, decodePcm, ensureSentences, VER };
+module.exports = { effPreset, keyOf, parseKey, sentKey, normSpeed, SPEEDS, tempoPcm, compactPcm, trimEdges, wavOf, decodePcm, ensureSentences, VER };

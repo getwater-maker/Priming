@@ -916,6 +916,10 @@ export default function App() {
   const [aiFmtDlg, setAiFmtDlg] = useState(false);  // 🏷 채널 편집의 AI 고지 서식 창(글꼴·크기·색·테두리·배경 — 자막 서식 창과 같은 패널)
   const [capSel, setCapSel] = useState(null);       // { shortsNum, mode: 'lines'|'chars', items: [{ groupNum, sentIdx, from, to, n }] }
   const [capPanel, setCapPanel] = useState(null);   // 'fmt' | 'anim'
+  // 🎤 마이크 녹음 창(v1.0.51) — { sn, groupNum, sentIdx, num, text, own, st:'idle'|'rec'|'done'|'busy', secs, url, err, note }
+  const [recPanel, setRecPanel] = useState(null);
+  const recRef = useRef({ mr: null, chunks: [], stream: null, timer: null, blob: null, ac: null, raf: 0 });
+  const recLevelRef = useRef(null);   // 소리 크기 막대(DOM 을 직접 고친다 — 매 프레임 다시 그리지 않게)
   // 🧭 Vrew 식 작업 화면(v0.5.42) — 메뉴(리본) · 보기(클립/카드) · ① 칸 폭 · 커서(자막 줄)
   // 메뉴는 켤 때마다 「대본·음성」부터(Vrew 도 홈부터) — 기억해 두면 다음 실행이 엉뚱한 메뉴로 열려 「열기」가 안 보인다
   const [menu, setMenu] = useState('home');
@@ -5361,7 +5365,7 @@ export default function App() {
     });
     setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: abs ? 'center' : 'nearest' }); }, 0);
   }
-  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg);
+  const anyModal = !!(preview || nameAsk || capDlg || aiFmtDlg || promptView || settingsOpen || ttsSrvOpen || comfyOpen || cvidOpen || urlOpen || tsOpen || impOpen || scriptEditOpen || ttsEng || vdOpen || dictOpen || styleEditOpen || chOpen || readerOpen || stockDlg || recPanel);
   useEffect(() => {
     if (!wsOn) return undefined;
     const onKey = (e) => {
@@ -6301,6 +6305,12 @@ export default function App() {
     <button data-testid="rb-pauseword" disabled={!loaded || !isLf} title="정지 워드 — 빈 클립(문장 뒤 무음) · 빈 워드(0.3초) · 정지 워드(1초)를 고른 클립 자리에 넣습니다. 누르면 마지막으로 고른 것을 엽니다" onClick={() => pwPick(pwLast)}><span className="rb-ic">{pwLast === 'clip' ? '▭' : pwLast === 'blank' ? '⋯' : '❄'}</span> <span className="rb-t">{pwLast === 'clip' ? '빈 클립' : pwLast === 'blank' ? '빈 워드' : '정지 워드'}</span></button>
     <button data-testid="rb-pauseword-more" disabled={!loaded || !isLf} title="빈 클립 · 빈 워드 · 정지 워드 중에서 고르기" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPwMenu((v) => (v ? null : { x: r.left - 60, y: r.bottom + 2 })); }}><span className="rb-ic">▾</span></button>
   </span>);
+  // 🎤 내 목소리(v1.0.51) — 고른 클립 하나의 음성을 마이크 녹음 · 녹음 파일(휴대폰 등)로 바꾸거나 되돌린다(편집 탭·클립 우클릭과 같은 함수)
+  const ribMyVoice = () => (<span className="hgroup" data-testid="rib-myvoice"><span className="glabel">내 목소리</span>
+    <button data-testid="rb-v-record" disabled={!selOk} title="녹음 — 고른 클립 하나를 마이크로 녹음해 그 음성으로 바꿉니다(문장 글을 보며 녹음 · Space 녹음/정지 · Enter 덮어쓰고 다음 클립)" onClick={openRec}><span className="rb-ic">🎤</span> <span className="rb-t">녹음</span></button>
+    <button data-testid="rb-v-file" disabled={!selOk} title="녹음 파일 — 휴대폰 등으로 녹음한 파일(m4a·mp3·wav…)을 고른 클립 하나의 음성으로 넣습니다(앞뒤 무음은 자동으로 자름)" onClick={() => clipVoiceOverwrite(false)}><span className="rb-ic">📂</span> <span className="rb-t">파일</span></button>
+    <button data-testid="rb-v-clear" disabled={!selOk} title="녹음 해제 — 고른 클립의 내 녹음을 빼고 AI 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}><span className="rb-ic">↩</span> <span className="rb-t">해제</span></button>
+  </span>);
   const ribVoiceExtra = () => (
               <span className="hgroup rb-extra">
         {/* 🔊 음성 엔진 — 옛 「출력(전체/음성만/화면만)」·「📥 Vrew 음성」 자리(로이 2026-10-04 — 더는 안 쓴다).
@@ -6811,6 +6821,122 @@ export default function App() {
     try { const r = await api.aiTranslate({ shortsNum: sn, lang: cur.lang }); setAiTr({ ...cur, busy: false, res: r }); }
     catch (e) { setAiTr({ ...cur, busy: false, res: { ok: false, error: e.message } }); }
   }
+  // 🎤 마이크로 녹음해서 덮어쓰기(v1.0.51 · 로이 2026-11-17) — MediaRecorder → rec-save(임시 파일) → 이미 있는 clip-voice-overwrite(path)
+  //   창에 그 클립(문장) 글을 크게 보여 주고 · 「덮어쓰고 다음 클립」으로 대본을 이어서 녹음한다 · Space = 녹음/정지 · Enter = 덮어쓰고 다음 · Esc = 닫기
+  function recInfo(sn, groupNum, sentIdx) {
+    const s = capSentence(sn, groupNum, sentIdx);
+    return { sn, groupNum, sentIdx, num: s ? s.num : null, text: s ? String(s.text || '') : '', own: !!(s && s.ow) };
+  }
+  function recStopMeter() {
+    const r = recRef.current;
+    try { if (r.raf) cancelAnimationFrame(r.raf); } catch (_) {} r.raf = 0;
+    try { if (r.ac) r.ac.close(); } catch (_) {} r.ac = null;
+    if (recLevelRef.current) recLevelRef.current.style.width = '0%';
+  }
+  function recCleanup() {
+    const r = recRef.current;
+    try { if (r.timer) clearInterval(r.timer); } catch (_) {} r.timer = null;
+    if (r.mr) { r.mr.onstop = null; try { if (r.mr.state !== 'inactive') r.mr.stop(); } catch (_) {} } r.mr = null;
+    try { if (r.stream) r.stream.getTracks().forEach((t) => t.stop()); } catch (_) {} r.stream = null;
+    recStopMeter(); r.blob = null; r.chunks = [];
+    setRecPanel((p) => { if (p && p.url) { try { URL.revokeObjectURL(p.url); } catch (_) {} } return p; });
+  }
+  function recClose() { recCleanup(); setRecPanel(null); }
+  function openRec() {
+    if (!clipSelOk()) { setStatus('🎤 녹음해서 덮어쓸 클립을 먼저 고르세요'); return; }
+    const uniq = new Set(capSel.items.map((x) => x.groupNum + ':' + x.sentIdx));
+    if (uniq.size !== 1) { setStatus('🎤 녹음은 클립 하나씩 합니다(녹음 한 개 = 문장 한 개)'); return; }
+    setClipMenu(null); setClipCtx(null);
+    if (playerOpen) stopPlayer();
+    const it = capSel.items[0];
+    setRecPanel({ ...recInfo(capSel.shortsNum, it.groupNum, it.sentIdx), st: 'idle', secs: 0, url: '', err: '', note: '' });
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (_) {}   // 리본 단추에 초점이 남으면 Space 가 그 단추를 다시 누른다
+  }
+  async function recStart() {
+    const r = recRef.current; recCleanup();
+    if (playerOpen) stopPlayer();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false } });
+      r.stream = stream; r.chunks = []; r.blob = null;
+      // 소리 크기 막대 — 마이크가 실제로 소리를 받는지 눈으로 본다
+      try {
+        const ac = new (window.AudioContext || window.webkitAudioContext)(); r.ac = ac;
+        const an = ac.createAnalyser(); an.fftSize = 1024; ac.createMediaStreamSource(stream).connect(an);
+        const buf = new Float32Array(an.fftSize);
+        const tick = () => {
+          an.getFloatTimeDomainData(buf); let m = 0; for (let i = 0; i < buf.length; i++) { const v = Math.abs(buf[i]); if (v > m) m = v; }
+          const db = m > 0 ? 20 * Math.log10(m) : -100;
+          if (recLevelRef.current) recLevelRef.current.style.width = Math.max(0, Math.min(100, (db + 60) / 60 * 100)) + '%';
+          r.raf = requestAnimationFrame(tick);
+        };
+        r.raf = requestAnimationFrame(tick);
+      } catch (_) {}
+      const mr = new MediaRecorder(stream); r.mr = mr;
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) r.chunks.push(e.data); };
+      mr.onstop = () => {
+        try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {} r.stream = null; recStopMeter();
+        const blob = new Blob(r.chunks, { type: mr.mimeType || 'audio/webm' }); const has = blob.size > 100; r.blob = has ? blob : null;
+        setRecPanel((p) => (p ? { ...p, st: has ? 'done' : 'idle', url: has ? URL.createObjectURL(blob) : '', err: has ? '' : '녹음된 소리가 없습니다' } : p));
+      };
+      mr.start(250);
+      r.timer = setInterval(() => setRecPanel((p) => (p && p.st === 'rec' ? { ...p, secs: p.secs + 1 } : p)), 1000);
+      setRecPanel((p) => (p ? { ...p, st: 'rec', secs: 0, url: '', err: '', note: '' } : p));
+    } catch (e) {
+      recCleanup();
+      const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+      const none = e && (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError');
+      setRecPanel((p) => (p ? { ...p, st: 'idle', err: denied ? '마이크를 쓸 수 없습니다 — Windows 설정 → 개인 정보 및 보안 → 마이크 에서 「데스크톱 앱이 마이크에 액세스하도록 허용」을 켜 주세요' : none ? '연결된 마이크가 없습니다 — 마이크를 꽂은 뒤 다시 누르세요' : '마이크를 쓸 수 없습니다 — ' + ((e && e.message) || e) } : p));
+    }
+  }
+  function recStop() { const r = recRef.current; try { if (r.timer) clearInterval(r.timer); } catch (_) {} r.timer = null; try { if (r.mr && r.mr.state !== 'inactive') r.mr.stop(); } catch (_) {} }
+  // 다음 클립(문장) — ② 목록 줄 순서에서 지금 문장 다음의 첫 줄 · 없으면 null
+  function recNextLine(p) {
+    const PL = linesMap.get(p.sn); if (!PL || !PL.list.length) return null;
+    let last = -1; PL.list.forEach((x, i) => { if (x.groupNum === p.groupNum && x.sentIdx === p.sentIdx) last = i; });
+    if (last < 0) return null;
+    for (let i = last + 1; i < PL.list.length; i++) { const x = PL.list[i]; if (x.groupNum !== p.groupNum || x.sentIdx !== p.sentIdx) return x; }
+    return null;
+  }
+  function recGoNext(p, note) {
+    const l = recNextLine(p);
+    recCleanup();
+    if (!l) { setRecPanel(null); setStatus(note ? note + ' — 마지막 클립입니다' : '🎤 마지막 클립입니다'); return; }
+    userCursor({ shortsNum: p.sn, n: l.n });
+    setCapSel({ shortsNum: p.sn, mode: 'lines', items: [{ n: l.n, groupNum: l.groupNum, sentIdx: l.sentIdx, from: l.from, to: l.to }], anchorN: l.n });
+    setTimeout(() => { const e = [...document.querySelectorAll('.sent[data-ln="' + l.n + '"]')].find((x) => x.offsetParent !== null); if (e && e.scrollIntoView) e.scrollIntoView({ block: 'center' }); }, 0);
+    setRecPanel({ ...recInfo(p.sn, l.groupNum, l.sentIdx), st: 'idle', secs: 0, url: '', err: '', note: note || '' });
+  }
+  async function recApply(goNext) {
+    const p = recPanel; const r = recRef.current; if (!p || !r.blob || p.st !== 'done') return;
+    setRecPanel({ ...p, st: 'busy' });
+    try {
+      const buf = new Uint8Array(await r.blob.arrayBuffer());
+      const sv = await api.recSave({ bytes: buf });
+      if (!sv || !sv.ok) { setRecPanel({ ...p, st: 'done', err: (sv && sv.error) || '저장하지 못했습니다' }); return; }
+      const o = await api.clipVoiceOverwrite({ shortsNum: p.sn, items: [{ groupNum: p.groupNum, sentIdx: p.sentIdx }], path: sv.path, fromMic: true });
+      if (o && o.dto) setDto(o.dto);
+      if (!(o && o.ok)) { setRecPanel({ ...p, st: 'done', err: (o && o.error) || '덮어쓰지 못했습니다' }); return; }
+      const msg = `🎤 컷${p.num} 내 녹음으로 덮어씀 (${o.dur.toFixed(1)}초${o.trimmed > 0.05 ? ` · 앞뒤 무음 ${o.trimmed.toFixed(1)}초 자름` : ''} · Ctrl+Z 되돌리기)`;
+      setStatus(msg);
+      if (goNext) recGoNext(p, msg); else recClose();
+    } catch (e) { setRecPanel({ ...p, st: 'done', err: e.message }); }
+  }
+  // 창이 열려 있는 동안 키: Space = 녹음/정지 · Enter = 덮어쓰고 다음 · Esc = 닫기(작업창 키는 anyModal 로 멈춘다)
+  const recKeyRef = useRef(null);
+  recKeyRef.current = (e) => {
+    if (!recPanel || e.altKey || e.ctrlKey || e.metaKey) return;
+    const tag = e.target && e.target.tagName;
+    if (e.key === 'Escape') { e.preventDefault(); if (recPanel.st !== 'busy') recClose(); return; }
+    if (e.key === ' ' && tag !== 'AUDIO') { e.preventDefault(); e.stopPropagation(); if (e.repeat) return; if (recPanel.st === 'rec') recStop(); else if (recPanel.st !== 'busy') recStart(); return; }
+    if (e.key === 'Enter' && tag !== 'BUTTON' && recPanel.st === 'done') { e.preventDefault(); recApply(true); }
+  };
+  useEffect(() => {
+    if (!recPanel) return undefined;
+    const h = (e) => recKeyRef.current && recKeyRef.current(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [!!recPanel]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { try { recCleanup(); } catch (_) {} }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   // 🎙 음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음으로(clear = 해제). 파일 고르기는 main 이 연다
   async function clipVoiceOverwrite(clear) {
     setClipMenu(null); setClipCtx(null);
@@ -6890,6 +7016,7 @@ export default function App() {
     <button data-testid="rb-marker" disabled={!selOk} title="마커 — 고른 클립에 표식을 달거나 지웁니다(이미 다 달려 있으면 지움 · 대본·출력에는 영향 없음)" onClick={() => clipMarker('toggle')}><span className="rb-ic">⚑</span> <span className="rb-t">마커</span></button>
     <button data-testid="rb-marker-list" disabled={!loaded} title="마커 모아 보기 — 표식이 달린 클립 목록 · 누르면 그 클립으로 이동" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMarkerList((v) => (v ? null : { x: r.left, y: r.bottom + 4 })); }}><span className="rb-ic">⚑</span> <span className="rb-t">마커 목록{markerEntries().length ? ` (${markerEntries().length})` : ''}</span></button>
     <button data-testid="rb-overwrite-voice" disabled={!selOk} title="음성 덮어쓰기 — 고른 클립 하나의 음성을 내 녹음 파일로 바꿉니다(Ctrl+Z 로 되돌림 · 다시 변환·만들기가 덮지 않습니다)" onClick={() => clipVoiceOverwrite(false)}><span className="rb-ic">🎙</span> <span className="rb-t">음성 덮어쓰기</span></button>
+    <button data-testid="rb-record" disabled={!selOk} title="녹음해서 덮어쓰기 — 고른 클립 하나의 음성을 마이크로 녹음해 바꿉니다(문장 글을 보며 녹음 · 덮어쓰고 다음 클립으로 이어서)" onClick={openRec}><span className="rb-ic">🎤</span> <span className="rb-t">녹음</span></button>
     <button data-testid="rb-overwrite-clear" disabled={!selOk} title="덮어쓴 음성 해제 — 고른 클립의 녹음을 빼고 음성 단계가 목소리로 다시 채우게 합니다" onClick={() => clipVoiceOverwrite(true)}><span className="rb-ic">↩</span> <span className="rb-t">녹음 해제</span></button>
     <span className="hdiv" />
     <button data-testid="rb-find-edit" title="찾아서 편집하기 — 검색 칸으로 이동(Ctrl+F). 찾은 클립은 ☑ 로 모두 골라 한꺼번에 고칠 수 있습니다" onClick={() => { const i = document.getElementById('find-input'); if (i) { i.focus(); i.select(); } }}><span className="rb-ic">🔎</span> <span className="rb-t">찾아서 편집하기</span></button>
@@ -7058,7 +7185,7 @@ export default function App() {
             {menu === 'caption' && (<>{ribCaption()}</>)}
             {menu === 'format' && (<>{ribFormat()}</>)}
             {menu === 'insert' && (<>{ribInsert()}</>)}
-            {menu === 'voice' && (<>{ribVoice()}{ribPauseWord()}{ribVoiceExtra()}</>)}
+            {menu === 'voice' && (<>{ribVoice()}{ribPauseWord()}{ribMyVoice()}{ribVoiceExtra()}</>)}
             {menu === 'template' && (<>{ribTemplate}</>)}
             {menu === 'effect' && (<>{ribEffect}</>)}
             {menu === 'make' && (<>{ribMakeSub}{makeSub === 'video' ? ribVideo() : ribImage()}{ribMakeExtra}</>)}
@@ -7264,6 +7391,27 @@ export default function App() {
             </div>
             <span className="meta">저장하는 것: 그림 효과(채우기·반전·움직임·확대·회전·배경색·필터·불투명도·자르기·전환) + 소리 효과(볼륨·노이즈 줄이기) · 입혀도 <b>자리·순서·켄번스 구간</b>은 그대로 · 템플릿에 없는 효과는 입힌 클립에서 꺼집니다(템플릿 = 효과 한 벌)</span>
             <div className="zr-btns"><button data-testid="tpl-close" onClick={() => setTplPanel(null)}>닫기</button></div>
+          </div>}
+          {recPanel && <div className="vr-menu-bg" onMouseDown={() => { if (recPanel.st !== 'rec' && recPanel.st !== 'busy') recClose(); }} />}
+          {recPanel && <div className="vr-menu zr-panel rec-panel" data-testid="rec-panel" onMouseDown={(e) => e.stopPropagation()}>
+            <b>🎤 녹음해서 덮어쓰기 · 컷{recPanel.num}{recPanel.own ? ' · 🎙 이미 내 녹음' : ''}</b>
+            <div className="rec-text" data-testid="rec-text">{recPanel.text || '(글 없음)'}</div>
+            <div className="rec-row">
+              {recPanel.st === 'rec'
+                ? <button data-testid="rec-stop" onClick={recStop}>■ 정지 ({recPanel.secs}초)</button>
+                : <button data-testid="rec-start" disabled={recPanel.st === 'busy'} onClick={recStart}>{recPanel.st === 'done' ? '● 다시 녹음' : '● 녹음 시작'}</button>}
+              {recPanel.st === 'rec' && <span className="rec-dot" data-testid="rec-live">● 녹음 중</span>}
+              <span className="rec-meter" title="마이크 소리 크기 — 말할 때 막대가 움직이지 않으면 마이크 연결·선택을 확인하세요"><span ref={recLevelRef} /></span>
+            </div>
+            {recPanel.url && <audio data-testid="rec-audio" controls src={recPanel.url} />}
+            {recPanel.err && <span className="meta rec-err" data-testid="rec-err">⚠ {recPanel.err}</span>}
+            {recPanel.note && !recPanel.err && <span className="meta" data-testid="rec-note">{recPanel.note}</span>}
+            <div className="zr-btns">
+              <button data-testid="rec-apply-next" disabled={recPanel.st !== 'done'} title="Enter" onClick={() => recApply(true)}>덮어쓰고 다음 클립 ▶</button>
+              <button className="ghost" data-testid="rec-apply" disabled={recPanel.st !== 'done'} onClick={() => recApply(false)}>덮어쓰고 닫기</button>
+              <button className="ghost" data-testid="rec-skip" disabled={recPanel.st === 'rec' || recPanel.st === 'busy'} title="이 클립은 그대로 두고 다음 클립으로" onClick={() => recGoNext(recPanel, '')}>건너뛰기 ▷</button>
+              <button className="ghost" data-testid="rec-close" disabled={recPanel.st === 'busy'} title="Esc" onClick={recClose}>닫기</button>
+            </div>
           </div>}
           {scenePanel && <div className="vr-menu-bg" onMouseDown={() => setScenePanel(null)} />}
           {scenePanel && <div className="vr-menu zr-panel scene-panel" data-testid="scene-panel" onMouseDown={(e) => e.stopPropagation()}>
@@ -7473,6 +7621,7 @@ export default function App() {
             <Row icon="✂" label="클립 나누기" onClick={clipSplitHere} tid="cx-split" />
             <Row icon="⊞" label="선택한 클립으로 새 씬 만들기" onClick={clipNewScene} tid="cx-newscene" />
             <Row icon="🎙" label="음성 덮어쓰기" onClick={() => clipVoiceOverwrite(false)} tid="cx-overwrite-voice" />
+            <Row icon="🎤" label="녹음해서 덮어쓰기" onClick={() => openRec()} tid="cx-rec" />
             <Row icon="↩" label="덮어쓴 음성 해제" onClick={() => clipVoiceOverwrite(true)} tid="cx-overwrite-clear" />
             <div className="vr-sep" />
             <Row icon="⚑" label="마커" kbd={(() => { const ss = capSel ? capSel.items.map((it) => capSentence(capSel.shortsNum, it.groupNum, it.sentIdx)).filter(Boolean) : []; return ss.length && ss.every((s) => s.mk) ? '✓' : null; })()} onClick={run(() => clipMarker('toggle'))} tid="cx-marker" />
