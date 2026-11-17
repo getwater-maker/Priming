@@ -85,17 +85,18 @@ function pickNext(files, today, isMade) {
 
 /**
  * 채널들 → 오늘 작업할 대본 목록.
- * channels: [{name, folder}] · isMade(file, channelName) → bool
+ * channels: [{name, folder}] · isMade(file, channelName) → bool · opts = { thumbRoot }(📦 패키징 판정의 썸네일 폴더)
  * → { today, items:[{channel, path, name, date, waiting, madeAhead, pack}], empty:[{channel, reason}] }
  */
-function findToday(channels, isMade, today = kstToday()) {
+function findToday(channels, isMade, today = kstToday(), opts = {}) {
+  const thumbIndex = thumbIndexOf(opts.thumbRoot);   // 썸네일 폴더는 한 번만 읽는다
   const items = [], empty = [];
   for (const ch of channels || []) {
     if (!ch || !ch.folder || !fs.existsSync(ch.folder)) { empty.push({ channel: ch && ch.name, reason: '대본 폴더 없음' }); continue; }
     const files = scanFolder(ch.folder, today);
     const r = pickNext(files, today, (f) => !!isMade(f, ch.name));
     if (!r.picks.length) { empty.push({ channel: ch.name, reason: r.madeAhead ? `앞으로 ${r.madeAhead}편 모두 만듦` : '오늘 이후 대본 없음' }); continue; }
-    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, waiting: r.waiting, madeAhead: r.madeAhead, pack: packagingStatus(f.path) });
+    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, waiting: r.waiting, madeAhead: r.madeAhead, pack: packagingStatus(f.path, { thumbIndex }) });
   }
   return { today, items, empty };
 }
@@ -106,10 +107,29 @@ function findToday(channels, isMade, today = kstToday()) {
  *   완료 = 업로드·썸네일이 쓰는 다섯 칸이 모두 채워짐: 제목 · 설명글 · 태그 · 고정댓글 · 썸네일 문구 A.
  *   (채널사업부는 제목·썸네일 문구를 대본 전에, 설명글·태그·고정댓글을 대본 뒤에 쓴다 — 앞쪽만 있으면 미완이다)
  *   fail-closed: 파일을 못 읽으면 미완.
+ * 🖼 썸네일 그림까지(v1.0.56 · 로이 2026-11-17 「썸네일 그림까지 있어야 넣을 수 있게」) — 패키징에 문구가 있는 안(A·B·C)마다
+ *   썸네일 폴더(⚙ 설정 → 📁 「썸네일」 · core/thumb-find 와 같은 자리: 폴더 바로 아래 + 한 단계 · `_` 폴더 제외)에
+ *   `[약칭_MMDD] 썸네일_<안>.png|jpg|jpeg|webp` 가 있어야 한다. 폴더를 지정하지 않았거나 없으면 미완.
+ * opts = { thumbRoot, thumbIndex? }(thumbIndex = thumbIndexOf(thumbRoot) — 여러 편을 볼 때 폴더를 한 번만 읽게)
  * → { ok, path|null, missing:[칸 이름] }
  */
 const PACK_FIELDS = ['제목', '설명글', '태그', '고정댓글', '썸네일 문구 A'];
-function packagingStatus(scriptPath) {
+const IMG_RE = /\.(png|jpe?g|webp)$/i;
+/** 썸네일 폴더 → 그림 파일 이름 Set(폴더 바로 아래 + 한 단계 · `_`·`.` 폴더 제외) | null(폴더 없음) */
+function thumbIndexOf(root) {
+  if (!root) return null;
+  let top;
+  try { top = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { return null; }
+  const set = new Set();
+  const add = (ents) => { for (const e of ents) if (e.isFile() && IMG_RE.test(e.name)) set.add(e.name); };
+  add(top);
+  for (const e of top) {
+    if (!e.isDirectory() || e.name.startsWith('_') || e.name.startsWith('.')) continue;
+    try { add(fs.readdirSync(path.join(root, e.name), { withFileTypes: true })); } catch (_) {}
+  }
+  return set;
+}
+function packagingStatus(scriptPath, opts = {}) {
   const YP = require('./yt-packaging');
   const pf = YP.findPackagingFile(scriptPath);
   if (!pf) return { ok: false, path: null, missing: ['패키징 파일'] };
@@ -119,7 +139,18 @@ function packagingStatus(scriptPath) {
   const th = require('./thumb-edit').parseThumbText(text);
   const have = { '제목': !!k.title, '설명글': !!k.description, '태그': k.tags.length > 0, '고정댓글': !!k.pinned, '썸네일 문구 A': !!(th.A && th.A.length) };
   const missing = PACK_FIELDS.filter((f) => !have[f]);
+  // 🖼 썸네일 그림 — 문구가 있는 안마다(문구 A 가 없어도 A 그림은 본다)
+  const idx = opts.thumbIndex !== undefined ? opts.thumbIndex : thumbIndexOf(opts.thumbRoot);
+  if (!idx) missing.push('썸네일 폴더(⚙ 설정 → 📁 폴더)');
+  else {
+    const key = (path.basename(String(scriptPath)).match(/^\[[^\]\r\n]+\]/) || [''])[0];
+    const plans = ['A', 'B', 'C'].filter((x) => x === 'A' || (th[x] && th[x].length));
+    for (const x of plans) {
+      const want = (n) => n.startsWith(key) && new RegExp('^\\s*썸네일_' + x + '\\.(png|jpe?g|webp)$', 'i').test(n.slice(key.length));
+      if (!key || ![...idx].some(want)) missing.push('썸네일 그림 ' + x);
+    }
+  }
   return { ok: !missing.length, path: pf, missing };
 }
 
-module.exports = { kstToday, dateOf, scanFolder, pickNext, findToday, packagingStatus, PACK_FIELDS };
+module.exports = { kstToday, dateOf, scanFolder, pickNext, findToday, packagingStatus, thumbIndexOf, PACK_FIELDS };

@@ -1936,7 +1936,7 @@ ipcMain.handle('today-scripts-scan', () => {
   const chans = all.filter((p) => p && p.name && !p.name.startsWith('__') && (p.startMode || 'longform') === 'longform' && p.scriptFolder);
   const byName = new Map(chans.map((p) => [p.name, p]));
   const uploaded = _uploadedNames();
-  const r = TS.findToday(chans.map((p) => ({ name: p.name, folder: p.scriptFolder })), (f, ch) => _scriptMade(f.path, byName.get(ch), uploaded));
+  const r = TS.findToday(chans.map((p) => ({ name: p.name, folder: p.scriptFolder })), (f, ch) => _scriptMade(f.path, byName.get(ch), uploaded), undefined, { thumbRoot: thumbRoot() });   // 📦 판정에 썸네일 그림까지(v1.0.56)
   const inQueue = new Set(((S.modes.longform && S.modes.longform.items) || []).map((it) => it.scriptPath));
   r.items = r.items.map((it) => ({ ...it, inQueue: inQueue.has(it.path) }));
   const unpacked = r.items.filter((x) => !(x.pack && x.pack.ok)).length;
@@ -1949,8 +1949,8 @@ ipcMain.handle('open-scripts-list', async (_e, args = {}) => {
   for (const x of list) {
     const preset = P.getPreset(x && x.presetName);
     if (!preset || !x.path || !fs.existsSync(x.path)) { log(`⚠ 대본을 열 수 없습니다 — ${x && x.path ? path.basename(x.path) : '(경로 없음)'}`); continue; }
-    // 📦 패키징이 끝난 대본만 큐에 넣는다(v1.0.55 · 로이 2026-11-17) — 화면이 보내도 여기서 다시 본다(판정 = today-scripts.packagingStatus 한 곳)
-    const pk = require('./core/today-scripts').packagingStatus(x.path);
+    // 📦 패키징(+ 🖼 썸네일 그림 · v1.0.56)이 끝난 대본만 큐에 넣는다(v1.0.55 · 로이 2026-11-17) — 화면이 보내도 여기서 다시 본다(판정 = today-scripts.packagingStatus 한 곳)
+    const pk = require('./core/today-scripts').packagingStatus(x.path, { thumbRoot: thumbRoot() });
     if (!pk.ok) { log(`📦 패키징 미완이라 큐에 넣지 않습니다 — ${path.basename(x.path)} (빠진 것: ${pk.missing.join('·')})`); continue; }
     entries.push({ scriptPath: x.path, preset, settings: _channelItemSettings(preset) });
   }

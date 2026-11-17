@@ -6284,7 +6284,7 @@ export default function App() {
   // 🧭 메뉴 줄(Vrew 12탭 · Lab) — 옛 리본 블록을 조각으로 잘라 새 탭에 다시 끼운 것. 기능·testid 는 그대로(대조표 docs/VrewLab/리본_선택자_대조표.md)
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
-            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다 · 📦 패키징(제목·설명글·태그·고정댓글·썸네일 문구 A)이 끝난 대본만 넣을 수 있습니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 가장 이른 편을 찾아 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다 · 📦 패키징(제목·설명글·태그·고정댓글·썸네일 문구 A)과 🖼 썸네일 그림(⚙ 설정 → 📁 썸네일 폴더)까지 끝난 대본만 넣을 수 있습니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
             {!compact && ribReaderBtn}
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
@@ -8443,7 +8443,7 @@ export default function App() {
                   const miss = (x.pack && x.pack.missing) || ['패키징 파일'];
                   return (
                     <label key={x.path} className={`today-row${on ? ' on' : ''}${pk ? '' : ' unpk'}`} data-pack={pk ? 'ok' : 'missing'} title={pk ? x.path : `${x.path}
-📦 패키징이 끝나야 큐에 넣을 수 있습니다 — 빠진 것: ${miss.join(' · ')}`}>
+📦 패키징·썸네일 그림이 끝나야 큐에 넣을 수 있습니다 — 빠진 것: ${miss.join(' · ')}`}>
                       <input type="checkbox" checked={on} disabled={!pk} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
                       <span className="today-ch">{x.channel}</span>
                       <span className="today-md">{x.date.slice(5).replace('-', '')}</span>

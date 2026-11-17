@@ -71,33 +71,53 @@ ok(/data-testid="today-scripts"/.test(APP), '렌더러 📅 버튼');
 // 여러 채널을 한 번에 여는 경로는 항목마다 자기 채널을 박는다(헤더 채널로 덮지 않는다)
 ok(/open-scripts-list[\s\S]{0,1500}_channelItemSettings\(/.test(MAIN), 'open-scripts-list: 항목마다 그 채널 설정');
 
-// [5] 📦 패키징 완료 판정(v1.0.55) — 패키징 파일 + 제목·설명글·태그·고정댓글·썸네일 문구 A
+// [5] 📦 패키징 완료 판정(v1.0.55) — 패키징 파일 + 제목·설명글·태그·고정댓글·썸네일 문구 A + 🖼 썸네일 그림(v1.0.56)
 const root5 = fs.mkdtempSync(path.join(os.tmpdir(), 'today-pack-'));
 try {
   const ch = path.join(root5, '채널');
   const sp = (n) => { const p = path.join(ch, '대본', '2026_11', n + '.md'); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, '# x\n'); return p; };
   const pk = (n, body) => { const p = path.join(ch, '패키징', '2026_11', n + '.md'); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); return p; };
+  const TH = path.join(root5, '썸네일');   // ⚙ 썸네일 폴더 — 채널 폴더 한 단계 아래에 그림
+  const img = (rel) => { const p = path.join(TH, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, 'x'); };
+  for (const k of ['1120', '1121', '1123', '1124']) img(`01_테스/[테스_${k}] 썸네일_A.png`);
+  const O = { thumbRoot: TH };
   const FULL = '# t\n\n## 제목\n좋은 제목\n\n## 썸네일 문구 A\n| 줄 | 색 |\n|---|---|\n| 첫 줄 | 흰색 |\n\n## 설명글\n```\n설명입니다\n```\n\n## 태그\n```\n가, 나\n```\n\n## 고정댓글\n```\n댓글\n```\n';
   const a = sp('[테스_1120] 완료'); pk('[테스_1120] 완료', FULL);
-  let s = T.packagingStatus(a);
+  let s = T.packagingStatus(a, O);
   ok(s.ok && !s.missing.length && /패키징/.test(s.path), '다섯 칸이 다 있으면 완료 — ' + JSON.stringify(s.missing));
   const b = sp('[테스_1121] 앞쪽만'); pk('[테스_1121] 앞쪽만', '# t\n\n## 제목\n제목\n\n## 썸네일 문구 A\n첫 줄\n');
-  s = T.packagingStatus(b);
+  s = T.packagingStatus(b, O);
   ok(!s.ok && s.missing.join() === '설명글,태그,고정댓글', '대본 전 단계(제목·썸네일만)는 미완 — ' + s.missing);
   const c = sp('[테스_1122] 없음');
-  s = T.packagingStatus(c);
+  s = T.packagingStatus(c, O);
   ok(!s.ok && s.path === null && s.missing[0] === '패키징 파일', '패키징 파일 없음 = 미완');
   const d = sp('[테스_1123] 빈칸'); pk('[테스_1123] 빈칸', FULL.replace('```\n댓글\n```', '```\n```'));
-  ok(T.packagingStatus(d).missing.join() === '고정댓글', '빈 고정댓글 = 미완(판정력)');
+  ok(T.packagingStatus(d, O).missing.join() === '고정댓글', '빈 고정댓글 = 미완(판정력)');
   const e = sp('[테스_1124] 썸네일없음'); pk('[테스_1124] 썸네일없음', FULL.replace(/## 썸네일 문구 A[\s\S]*?(?=## 설명글)/, ''));
-  ok(T.packagingStatus(e).missing.join() === '썸네일 문구 A', '썸네일 문구 A 없음 = 미완');
-  const res = T.findToday([{ name: '테스', folder: path.join(ch, '대본') }], () => false, '2026-11-20');
+  ok(T.packagingStatus(e, O).missing.join() === '썸네일 문구 A', '썸네일 문구 A 없음 = 미완');
+  // 🖼 썸네일 그림
+  const WITH_B = FULL + '\n## 썸네일 문구 B\n둘째 안\n';
+  img('01_테스/[테스_1125] 썸네일_A.png');
+  const f6 = sp('[테스_1125] B그림없음'); pk('[테스_1125] B그림없음', WITH_B);
+  ok(T.packagingStatus(f6, O).missing.join() === '썸네일 그림 B', '문구 B 가 있는데 B 그림이 없으면 미완 — ' + T.packagingStatus(f6, O).missing);
+  img('_보관/[테스_1125] 썸네일_B.png');
+  ok(T.packagingStatus(f6, O).missing.join() === '썸네일 그림 B', '`_` 보관 폴더의 그림은 세지 않는다');
+  img('01_테스/[테스_1125] 썸네일_B.jpg');
+  ok(T.packagingStatus(f6, O).ok, 'B 그림(jpg)이 생기면 완료');
+  const g = sp('[테스_1127] A그림없음'); pk('[테스_1127] A그림없음', FULL);
+  ok(T.packagingStatus(g, O).missing.join() === '썸네일 그림 A', '패키징이 다 있어도 A 그림이 없으면 미완(판정력)');
+  img('01_테스/[테스_11270] 썸네일_A.png');
+  ok(T.packagingStatus(g, O).missing.join() === '썸네일 그림 A', '열쇠가 다른 그림([테스_11270])은 세지 않는다');
+  ok(T.packagingStatus(a).missing.join() === '썸네일 폴더(⚙ 설정 → 📁 폴더)', '썸네일 폴더를 안 주면 미완(fail-closed)');
+  ok(T.packagingStatus(a, { thumbRoot: path.join(root5, '없는폴더') }).missing.join() === '썸네일 폴더(⚙ 설정 → 📁 폴더)', '없는 썸네일 폴더 = 미완');
+  const res = T.findToday([{ name: '테스', folder: path.join(ch, '대본') }], () => false, '2026-11-20', O);
   ok(res.items.length === 1 && res.items[0].pack && res.items[0].pack.ok === true, 'findToday 항목에 pack 이 실린다');
 } finally { fs.rmSync(root5, { recursive: true, force: true }); }
 // 연결 — main 이 큐에 넣기 전에 다시 막는다 · 화면은 pack.ok 로만 고르게 한다(다시 판정하지 않음)
-ok(/open-scripts-list[\s\S]{0,900}packagingStatus\(x\.path\)[\s\S]{0,200}if \(!pk\.ok\)[^\n]*continue/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다');
+ok(/open-scripts-list[\s\S]{0,900}packagingStatus\(x\.path, \{ thumbRoot: thumbRoot\(\) \}\)[\s\S]{0,200}if \(!pk\.ok\)[^\n]*continue/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다');
 ok(/const todayPackOk = \(x\) => !!\(x && x\.pack && x\.pack\.ok\)/.test(APP) && /disabled=\{!pk\}/.test(APP) && /tp\.sel\[x\.path\] && todayPackOk\(x\)/.test(APP), '화면: 미완은 고를 수 없고 넣을 때도 거른다');
 ok(!/packagingStatus|findPackagingFile/.test(APP), '화면이 패키징을 따로 판정하지 않는다');
+ok(/today-scripts-scan[\s\S]{0,900}findToday\([^\n]*\{ thumbRoot: thumbRoot\(\) \}\)/.test(MAIN), 'main 찾기도 썸네일 폴더를 넘긴다');
 
 console.log(`today-scripts: ${pass} 통과 · ${fail} 실패`);
 process.exit(fail ? 1 : 0);

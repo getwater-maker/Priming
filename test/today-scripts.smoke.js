@@ -43,14 +43,14 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
       ipcMain.removeHandler('today-scripts-scan');
       ipcMain.handle('today-scripts-scan', () => ({ today: '2026-11-17', empty: [], items: [
         { channel: '가채널', path: 'C:\\x\\[가_1117] 완료.md', name: '[가_1117] 완료', date: '2026-11-17', waiting: 0, pack: { ok: true, missing: [] } },
-        { channel: '나채널', path: 'C:\\x\\[나_1117] 미완.md', name: '[나_1117] 미완', date: '2026-11-17', waiting: 0, pack: { ok: false, missing: ['설명글', '태그'] } },
+        { channel: '나채널', path: 'C:\\x\\[나_1117] 미완.md', name: '[나_1117] 미완', date: '2026-11-17', waiting: 0, pack: { ok: false, missing: ['설명글', '썸네일 그림 B'] } },
       ] }));
     });
     await win.click('[data-testid="today-scripts"]');
     await win.waitForSelector('[data-testid="today-pick"] .today-row', { timeout: 5000 });
     const st = await win.evaluate(() => [...document.querySelectorAll('[data-testid="today-pick"] .today-row')].map((r) => { const i = r.querySelector('input'); return { pk: r.dataset.pack, d: i.disabled, c: i.checked, t: r.textContent }; }));
     ok(st.length === 2 && st[0].pk === 'ok' && st[0].c && !st[0].d, '완료 대본은 처음부터 선택됨');
-    ok(st[1].pk === 'missing' && st[1].d && !st[1].c && /패키징 미완/.test(st[1].t) && /설명글·태그/.test(st[1].t), '미완 대본은 꺼진 칸 + 빠진 것 표시 — ' + (st[1] && st[1].t));
+    ok(st[1].pk === 'missing' && st[1].d && !st[1].c && /패키징 미완/.test(st[1].t) && /설명글·썸네일 그림 B/.test(st[1].t), '미완 대본은 꺼진 칸 + 빠진 것 표시 — ' + (st[1] && st[1].t));
     await win.click('[data-testid="today-pick"] .today-all');   // 모두 해제
     await win.click('[data-testid="today-pick"] .today-all');   // 모두 선택 — 미완은 그대로 꺼짐
     ok(await win.evaluate(() => { const i = [...document.querySelectorAll('[data-testid="today-pick"] .today-row input')]; return i[0].checked && !i[1].checked; }), '「모두 선택」도 미완은 고르지 않는다');
