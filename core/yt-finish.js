@@ -69,7 +69,9 @@ function planFinish(a = {}) {
   for (const [v, src] of tries) { const r = parsePlaylistRef(v); if (r) { playlist = { ...r, source: src }; break; } }
   // ⏰ schedule = 이번 업로드에 실은 예약 {publishAt(ISO UTC), kst} — 없으면 예약은 Studio 몫(확인표 ✋)
   const sc = a.schedule && a.schedule.publishAt ? { publishAt: a.schedule.publishAt, kst: a.schedule.kst || '' } : null;
-  return { thumbA, thumbOthers: others, playlist, pinned: String(pk.pinned || '').trim(), packagingPath: a.packagingPath || null, schedule: sc };
+  // 👁 privacy = 이번 업로드에 보낸 공개 상태('unlisted'|'private' · v1.0.58) — 없으면(마무리만 다시) 확인하지 않는다
+  const pv = a.privacy === 'unlisted' || a.privacy === 'private' ? a.privacy : null;
+  return { thumbA, thumbOthers: others, playlist, pinned: String(pk.pinned || '').trim(), packagingPath: a.packagingPath || null, schedule: sc, privacy: pv };
 }
 
 async function _json(res) { try { return await res.json(); } catch (_) { return {}; } }
@@ -196,8 +198,21 @@ async function finishVideo(o) {
     } catch (e) { add('playlist', '재생목록', 'fail', e.message); }
   }
 
+  // 👁 공개 상태 — 일부 공개로 보냈으면 **다시 읽어** 실제로 일부 공개인지 확인(videos.list · 1단위 · 예약은 아래 ⏰ 가 본다)
+  let unlistedOk = false;
+  if (plan.privacy === 'unlisted' && !plan.schedule) {
+    try {
+      const r = await fetch(`${EP.api}/videos?part=status&id=${encodeURIComponent(videoId)}`, H());
+      const j = await _json(r);
+      const got = r.status === 200 ? ((((j.items || [])[0] || {}).status || {}).privacyStatus || '') : '';
+      if (got === 'unlisted') { unlistedOk = true; add('privacy', '공개 상태', 'ok', '일부 공개 — 유튜브가 돌려준 값과 일치'); }
+      else if (r.status !== 200) add('privacy', '공개 상태', 'fail', `일부 공개로 보냈지만 다시 읽지 못했습니다 — ${_apiMsg(r.status, j)} · Studio 에서 확인하세요`);
+      else add('privacy', '공개 상태', 'fail', `일부 공개로 보냈지만 유튜브 값은 「${got || '?'}」입니다 — Studio 에서 확인하세요`);
+    } catch (e) { add('privacy', '공개 상태', 'fail', `일부 공개 확인 실패 — ${e.message}`); }
+  } else if (plan.privacy === 'private' && !plan.schedule) add('privacy', '공개 상태', 'skip', '비공개로 올림(채널 설정)');
+
   // ③ Studio 몫(API 없음) — 무엇이 준비돼 있는지까지 적는다
-  add('pinned', '고정댓글', plan.pinned ? 'manual' : 'fail', plan.pinned ? `문구 준비됨(${Array.from(plan.pinned).length}자) — 일부 공개 → 댓글 → 고정` : '패키징에 「## 고정댓글」이 없습니다');
+  add('pinned', '고정댓글', plan.pinned ? 'manual' : 'fail', plan.pinned ? `문구 준비됨(${Array.from(plan.pinned).length}자) — ${unlistedOk ? '이미 일부 공개 → 댓글 → 고정' : '일부 공개 → 댓글 → 고정'}` : '패키징에 「## 고정댓글」이 없습니다');
   add('abtest', '썸네일 A/B', plan.thumbOthers.length ? 'manual' : 'skip', plan.thumbOthers.length ? `${plan.thumbOthers.map((t) => t.name.replace(/^.*썸네일_/, '')).join('·')} — 편집 화면 「A/B 테스팅」` : 'B·C 파일 없음');
   add('endscreen', '종료화면', 'manual', 'Studio 편집 화면');
   if (!plan.schedule) add('schedule', '예약', 'manual', '채널 설정에서 예약을 켜지 않았습니다 — 필요하면 Studio 공개 상태 → 예약(고정댓글을 단 뒤에)');

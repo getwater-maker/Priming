@@ -141,12 +141,13 @@ const PLID = 'PLabcdefghijklmnopqrstuvwxyz012345';
 
   console.log('\n[8] main.js · 화면 배선');
   const run = M.slice(M.indexOf('async function runYtUpload'), M.indexOf('/** 렌더가 끝난 뒤'));
-  ok(/if \(finish\) r\.finish = await runYtFinish\(\{ channelId, videoId: r\.videoId, title, finish: sched \? \{ \.\.\.finish, schedule: \{[^}]*\} \} : finish \}\)/.test(run), '업로드 성공 뒤 마무리(예약이 있으면 예약을 함께 싣는다 · v0.9.68)');
+  ok(/if \(finish\) r\.finish = await runYtFinish\(\{ channelId, videoId: r\.videoId, title, finish: \{ \.\.\.finish, privacy, \.\.\.\(sched \? \{ schedule: \{[^}]*\} \} : \{\}\) \} \}\)/.test(run), '업로드 성공 뒤 마무리(공개 상태 · 예약이 있으면 예약도 함께 싣는다 · v0.9.68 · v1.0.58)');
   ok(/if \(finish && dup\.videoId\) await runYtFinish\(\{ channelId, videoId: dup\.videoId, title, finish \}\)/.test(run), '이미 올린 영상(중복)이면 마무리만');
   const fin = M.slice(M.indexOf('async function runYtFinish'), M.indexOf('/** 렌더가 끝난 뒤'));
   ok(/thumbRoot\(\)/.test(fin) && /findThumbs\(/.test(fin) && /findPackagingFile\(finish\.scriptPath\)/.test(fin), '마무리는 업로드를 줄 세운 순간의 대본(finish.scriptPath)으로 패키징·썸네일을 찾는다');
   ok(/catch \(e\) \{\s*log\(`⚠ 업로드 마무리 못 함/.test(fin), '마무리는 던지지 않는다(업로드 성공을 뒤집지 않는다)');
-  const enq = (M.match(/enqueueYtUpload\(\{ file[^\n]*\}\)/g) || []);
+  // 🤖 2.0 무인 주문(noSchedule: true)은 일부러 finish:null — 예약·마무리는 2.0 이 API 로 한다(v1.0.18) · 그 줄은 센다에서 뺀다
+  const enq = (M.match(/enqueueYtUpload\(\{ file[^\n]*\}\)/g) || []).filter((l) => !/noSchedule: true/.test(l));
   ok(enq.length >= 3 && enq.every((l) => /finish: ytFinishJob\(/.test(l)), `업로드를 줄 세우는 곳 ${enq.length}곳 모두 finish 를 싣는다`);
   ok((M.match(/finishOnly: true/g) || []).length === 4, '이미 올린 영상의 마무리만 = 자동 업로드 · 이 대본만 · 큐 전체 세 곳 + 썸네일 A 다시 찾기(v1.0.57)');
   ok(/if \(!plan\.thumbA && pf && key && root && tries < THUMB_RETRY_MAX\)/.test(fin) && /thumbRetry: tries \+ 1/.test(fin) && /THUMB_RETRY_MAX = 4, THUMB_RETRY_MIN = 30/.test(M), '썸네일 A 가 없으면 마무리만 30분 뒤 다시(4번까지 · 패키징·썸네일 폴더가 있는 대본만)');

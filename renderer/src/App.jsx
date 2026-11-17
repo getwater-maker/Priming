@@ -840,7 +840,7 @@ export default function App() {
   const [sttProg, setSttProg] = useState(null);   // 📊 🎧 STT(파일 전사) 진행 패널(main 의 stt-progress)
   const [readerOpen, setReaderOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);   // 📘 대본 작성 기준(docs/대본-작성-가이드.md · v0.8.9)   // 📄 대본 읽기(점검·수정 · A4 PDF)
-  const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 비공개 업로드 진행 패널(main 의 yt-progress)
+  const [ytProg, setYtProg] = useState(null);     // ⬆ 유튜브 업로드 진행 패널(main 의 yt-progress)
   const [ytSt, setYtSt] = useState(null);         // ⬆ 유튜브 연결 상태 {hasClient, projectId, channels[]}
   const [makeProg, setMakeProg] = useState(null); // 📊 롱폼 ⚡ 만들기 진행 팝업(main 의 make-progress)
   // 📍 제작 화면 따라가기(v0.9.43 · 로이 2026-10-16) — 만드는 대본으로 화면을 옮기고 ①·② 를 core/follow-target 기준으로.
@@ -3874,6 +3874,7 @@ export default function App() {
       // ⬆ 유튜브 자동 업로드 — ⚠ 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       ytAuto: !!p.ytAuto, ytChannelId: p.ytChannelId || '',
       ytSchedule: { on: !!(p.ytSchedule && p.ytSchedule.on), time: (p.ytSchedule && p.ytSchedule.time) || '18:00' },   // ⏰ 예약 업로드(KST) · ⚠ 저장 patch 에도
+      ytPrivacy: p.ytPrivacy === 'private' ? 'private' : 'unlisted',   // 👁 올릴 때 공개 상태(v1.0.58 · 기본 일부 공개 · 판정 core/yt-schedule.privacyFor) · ⚠ 저장 patch 에도
       ytPlaylist: p.ytPlaylist || '',   // 🧷 업로드 마무리 — 이 채널 영상을 담을 재생목록 이름(패키징에 없을 때) · ⚠ 저장 patch 에도
       // 💬 화이트보드 자막 모양(글자·위치·폰트) — 저장된 값이 없으면 기본값으로 시작한다.
       wbSub: { ...WB_SUB_DEFAULT, ...(p.wbSub || {}) },
@@ -4370,9 +4371,10 @@ export default function App() {
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
-      ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(비공개) — ⚠ patch 에 안 실으면 덮인다
+      ytAuto: !!ch.ytAuto && !!ch.ytChannelId, ytChannelId: ch.ytChannelId || '',   // ⬆ 유튜브 자동 업로드(공개 상태 = ytPrivacy) — ⚠ patch 에 안 실으면 덮인다
       ytSchedule: { on: !!(ch.ytSchedule && ch.ytSchedule.on) && /^\d{1,2}:\d{2}$/.test((ch.ytSchedule && ch.ytSchedule.time) || ''), time: (ch.ytSchedule && ch.ytSchedule.time) || '18:00' },   // ⏰ 예약 업로드 — ⚠ 마찬가지
       ytPlaylist: String(ch.ytPlaylist || '').trim(),   // 🧷 업로드 마무리 재생목록 이름 — ⚠ 마찬가지
+      ytPrivacy: ch.ytPrivacy === 'private' ? 'private' : 'unlisted',   // 👁 올릴 때 공개 상태 — ⚠ 마찬가지
       // 💬 화이트보드 자막 모양 — ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       wbSub: {
         font: (ch.wbSub && ch.wbSub.font) || WB_SUB_DEFAULT.font,
@@ -4545,7 +4547,7 @@ export default function App() {
   async function runYtUpload() {
     try {
       const r = await api.ytUploadCurrent({ presetName, kind: outTarget === 'whiteboard' ? 'whiteboard' : 'mp4' });
-      if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (비공개)${r.skipped ? ` · 건너뜀 ${r.skipped}건(로그 참고)` : ''}`);
+      if (r && r.queued) setStatus(`⬆ 유튜브 업로드 ${r.queued}건 시작 (채널 설정 공개 상태 · 기본 일부 공개)${r.skipped ? ` · 건너뜀 ${r.skipped}건(로그 참고)` : ''}`);
       else if (r && r.skipped) setStatus(`⬆ 올릴 영상이 없습니다 — ${r.skipped}건 건너뜀(로그 참고)`);
     }
     catch (e) { uiAlert(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); }
@@ -6456,7 +6458,7 @@ export default function App() {
             {(outTarget === 'mp4' || outTarget === 'whiteboard') && (() => {
               const chp = (presets || []).find((q) => q.name === presetName) || null;
               const eff = uploadAfter === 'on';   // 업로드 여부는 이 체크박스 하나만 정한다(채널 설정 무관)
-              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 비공개 업로드합니다(MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 업로드 여부는 이 체크박스 하나만 정합니다(이 PC 에 기억 · 채널 설정에는 올릴 채널만 고릅니다).' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              return <label className="chk" data-testid="upload-after-make" title={'체크: 다 만들면 채널의 업로드채널로 업로드합니다(공개 상태 = 채널 설정 · 기본 일부 공개 · MP4·화이트보드 MP4 만 · 큐면 대본마다). 해제: 올리지 않습니다 — 확인하고 직접 올릴 때. 업로드 여부는 이 체크박스 하나만 정합니다(이 PC 에 기억 · 채널 설정에는 올릴 채널만 고릅니다).' + (eff && chp && !chp.ytChannelId ? '\n⚠ 이 채널은 업로드채널이 정해지지 않았습니다 — ⚙ 채널편집 → 📁 폴더' : '')} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input type="checkbox" style={{ width: 'auto' }} checked={eff} onChange={(e) => { pickUploadAfter(e.target.checked); if (e.target.checked && chp && !chp.ytChannelId) setStatus('⚠ 이 채널은 업로드채널이 정해지지 않아 올리지 못합니다 — ⚙ 채널편집 → 📁 폴더 → 업로드채널'); }} />완성 후 업로드</label>;
             })()}
             {outTarget === 'whiteboard' && (<>
@@ -6478,7 +6480,7 @@ export default function App() {
             <span className="hdiv" />
             {/* 📄 대본 보기는 리본 오른쪽 끝(■ 중단 아래)으로 옮겨 어느 메뉴에서나 보인다(로이 2026-09-26) */}
             {/* ▶ 미리보기는 대본 카드 아래 버튼 줄에 있다 — ④ 완성의 중복 버튼은 뺐다(로이 2026-09-25) */}
-            {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 비공개로 올립니다(자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
+            {(outTarget === 'mp4' || outTarget === 'whiteboard') && <button className="ghost" disabled={!loaded} title="이 대본의 🎬 유튜브 MP4(✏ 화이트보드면 화이트보드 MP4)를 채널에 올립니다(공개 상태 = 채널 설정 · 기본 일부 공개 · 자동 업로드를 끈 채널 · 실패 뒤 다시). 채널은 ⚙ 채널편집 → 📁 폴더 → 업로드채널에서 고릅니다." onClick={runYtUpload}><span className="rb-ic">⬆</span> <span className="rb-t">업로드</span></button>}
             <button className="ghost" disabled={!loaded} data-testid="open-out-folder" title={outTarget === 'mp4' ? '🎬 유튜브 MP4 가 저장되는 폴더(채널 「저장 폴더」)를 엽니다' : outTarget === 'whiteboard' ? '✏ 화이트보드 MP4 폴더를 엽니다' : '.vrew 가 저장되는 대본 폴더를 엽니다'} onClick={() => api.openFolder({ target: outTarget, presetName: presetName || null })}><span className="rb-ic">📁</span> <span className="rb-t">출력폴더</span></button>
           </span>
               <span className="hgroup rb-extra" id="capbar">
@@ -8391,12 +8393,17 @@ export default function App() {
                           {((ytSt && ytSt.channels) || []).map((c) => <option key={c.id} value={c.id}>{c.title}{c.broken || c.needsReconnect ? ' (⚠ 다시 연결)' : ''}</option>)}
                           {ch.ytChannelId && !((ytSt && ytSt.channels) || []).some((c) => c.id === ch.ytChannelId) && <option value={ch.ytChannelId}>⚠ 이 PC 에서 연결 안 된 채널</option>}
                         </select>
-                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 <b>비공개</b>로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
+                        <select data-testid="ch-yt-privacy" value={ch.ytPrivacy === 'private' ? 'private' : 'unlisted'} onChange={(e) => setCh({ ...ch, ytPrivacy: e.target.value })}>
+                          <option value="unlisted">👁 일부 공개로 올리기</option>
+                          <option value="private">🔒 비공개로 올리기</option>
+                        </select>
+                        <Hint>👁 <b>일부 공개</b>(기본)로 올리면 Studio 에서 바로 고정댓글을 달 수 있습니다 — 검색·구독 피드에는 나오지 않고 링크를 아는 사람만 봅니다. 🔒 <b>비공개</b>는 예전 방식입니다. <b>예약</b>을 켜면 구글 규칙상 언제나 비공개로 올라갑니다. 올린 뒤 실제 공개 상태를 다시 읽어 로그 확인표에 적습니다.</Hint>
+                        <Hint>🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 고른 채널에 위에서 고른 공개 상태(기본 <b>일부 공개</b>)로 올립니다(무음 화이트보드는 올리지 않습니다). 제목·설명·태그는 패키징 파일에서, 설명 끝에 ⏱ 챕터를 붙이고 「AI 합성 콘텐츠」를 표시합니다. 올릴지 말지는 헤더 「④ 완성 → 완성 후 업로드」가 정합니다. 채널 연결은 ⚙ 설정 → 📺 채널 연결.</Hint>
                         <span style={{ display: 'flex', gap: 4, alignItems: 'center' }} data-testid="ch-yt-sched">
                           <button data-testid="ch-yt-sched-on" aria-pressed={!!(ch.ytSchedule && ch.ytSchedule.on)} className={'dl-tg' + (ch.ytSchedule && ch.ytSchedule.on ? ' on' : '')} onClick={() => setCh({ ...ch, ytSchedule: { time: '18:00', ...(ch.ytSchedule || {}), on: !(ch.ytSchedule && ch.ytSchedule.on) } })}>{ch.ytSchedule && ch.ytSchedule.on ? '✓ 예약' : '예약 끔'}</button>
                           <input data-testid="ch-yt-sched-time" type="time" style={{ flex: '0 0 92px' }} value={(ch.ytSchedule && ch.ytSchedule.time) || '18:00'} disabled={!(ch.ytSchedule && ch.ytSchedule.on)} onChange={(e) => setCh({ ...ch, ytSchedule: { ...(ch.ytSchedule || {}), time: e.target.value } })} /><span className="meta">KST</span>
                         </span>
-                        <Hint>⏰ <b>예약</b>을 켜면 올릴 때 공개 시각을 함께 보냅니다(하루 한 편 · 여러 편이면 다음 날로 이어 붙임 · 시각은 한국 시간). 올린 뒤 유튜브에 예약이 <b>실제로 잡혔는지 다시 읽어</b> 로그에 ✅/⚠ 로 적습니다. 끄면 예전처럼 비공개로만 올립니다. 예약이 안 잡혔으면 ⚠ 로 알려 줍니다.</Hint>
+                        <Hint>⏰ <b>예약</b>을 켜면 올릴 때 공개 시각을 함께 보냅니다(하루 한 편 · 여러 편이면 다음 날로 이어 붙임 · 시각은 한국 시간). 올린 뒤 유튜브에 예약이 <b>실제로 잡혔는지 다시 읽어</b> 로그에 ✅/⚠ 로 적습니다. 끄면 위에서 고른 공개 상태(기본 일부 공개)로 올립니다. 예약이 안 잡혔으면 ⚠ 로 알려 줍니다.</Hint>
                         <input data-testid="ch-yt-playlist" placeholder="재생목록 이름" value={ch.ytPlaylist || ''} onChange={(e) => setCh({ ...ch, ytPlaylist: e.target.value })} />
                         <Hint>🧷 업로드가 끝나면 썸네일 A 와 이 <b>재생목록</b>을 앱이 넣고 다시 읽어 확인합니다. 이름은 유튜브의 재생목록 제목과 <b>똑같이</b> 적으세요. 패키징 「## 재생목록」이나 고정댓글의 재생목록 링크가 있으면 그것이 먼저입니다. 고정댓글·썸네일 A/B·종료화면·예약은 Studio 에서 합니다.</Hint>
                       </div>
@@ -8818,7 +8825,7 @@ export default function App() {
 
             {settingsTab === 'yt' && (<div>
               <Hint>
-                🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>비공개</b>(채널 편집에서 ⏰ 예약을 켜면 예약 공개)로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
+                🎬 유튜브 MP4 · ✏ 화이트보드 MP4 를 만들면 채널에 <b>일부 공개</b>(채널 편집에서 비공개로 바꿀 수 있음 · ⏰ 예약을 켜면 비공개 + 예약 공개)로 올립니다 — 제목·설명·태그(패키징 파일) · ⏱ 챕터 · <b>AI 합성 콘텐츠 표시</b>까지.
                 올린 뒤 <b>썸네일·재생목록</b>은 앱이 넣고, 채널 편집에서 <b>⏰ 예약</b>을 켜면 공개 시각도 함께 보냅니다. 고정댓글·종료화면은 Studio 에서 하세요. 연결 정보는 <b>이 PC 에만</b> 암호화돼 저장됩니다(PC·계정마다 따로 연결).
               </Hint>
               {ytSt && !ytSt.available && <Hint>⚠ 이 PC 에서는 OS 암호화(safeStorage)를 쓸 수 없어 유튜브 연결을 저장할 수 없습니다.</Hint>}

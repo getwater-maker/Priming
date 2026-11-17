@@ -535,7 +535,7 @@ async function uploadVideo(o = {}) {
       defaultAudioLanguage: o.language || 'ko',
     },
     status: {
-      privacyStatus: 'private',                          // 🔑 안전한 기본값(로이 선택 — 구글이 강제하는 것이 아니다) · 예약(publishAt)도 private 과 함께 보낸다
+      privacyStatus: 'private',                          // 🔑 기본은 비공개 — 부르는 쪽이 o.privacy:'unlisted' 를 줄 때만 아래에서 일부 공개로(v1.0.58 · 채널 값 해석은 yt-schedule.privacyFor) · 예약(publishAt)은 언제나 private 과 함께
       selfDeclaredMadeForKids: !!o.madeForKids,          // 아동용 아님(로이 채널 기본) — Studio 에서 바꿀 수 있다
       containsSyntheticMedia: o.synthetic !== false,     // 🤖 「변경되거나 합성된 콘텐츠」 = 예 (AI 음성·이미지)
     },
@@ -546,6 +546,8 @@ async function uploadVideo(o = {}) {
     if (Number.isFinite(t) && t > Date.now()) meta.status.publishAt = new Date(t).toISOString();
     else log(`⚠ 예약 시각(${o.publishAt})이 올바르지 않거나 이미 지나 비공개로만 올립니다`);
   }
+  // 👁 일부 공개(v1.0.58) — 'unlisted' 만 받는다(⛔ public) · 예약이 실린 업로드는 비공개 그대로
+  if (o.privacy === 'unlisted' && !meta.status.publishAt) meta.status.privacyStatus = 'unlisted';
   const startedAt = Date.now();
   const tick = (phase, sent, extra = {}) => { try { onProgress({ phase, sent, total: size, startedAt, ...extra }); } catch (_) {} };
 

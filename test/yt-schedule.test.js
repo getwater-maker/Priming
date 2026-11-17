@@ -86,6 +86,25 @@ const T = (s) => Date.parse(s);   // 'YYYY-MM-DDTHH:MM:SS+09:00' → 순간
   r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: YF.planFinish({ pack: {}, thumbs: [] }), token });
   ok(row(r).status === 'manual' && /켜지 않았습니다/.test(row(r).detail), '예약을 안 썼으면 예전처럼 Studio 몫(✋)');
   ok(!YF.reportLines('t', r).join('\n').match(/[✗❌]/), '결과 줄에 ✗·❌ 없음(자기 오류 되잡기 방지)');
+  // 👁 공개 상태 확인표(v1.0.58)
+  const prow = (r) => r.items.find((x) => x.key === 'privacy');
+  const pin = (r) => r.items.find((x) => x.key === 'pinned');
+  const planU = YF.planFinish({ pack: { pinned: '댓글' }, thumbs: [], privacy: 'unlisted' });
+  G.videoStatus = { privacyStatus: 'unlisted' };
+  r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: planU, token });
+  ok(prow(r).status === 'ok' && /일부 공개/.test(prow(r).detail) && /이미 일부 공개/.test(pin(r).detail), '일부 공개로 올라갔으면 ✅ + 고정댓글 안내 「이미 일부 공개」');
+  G.videoStatus = { privacyStatus: 'private' };
+  r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: planU, token });
+  ok(prow(r).status === 'fail' && /private/.test(prow(r).detail) && !/이미 일부 공개/.test(pin(r).detail), '판정력: 유튜브 값이 비공개면 ⚠ (조용히 성공 처리 안 함)');
+  G.listStatus = 500;
+  r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: planU, token });
+  ok(prow(r).status === 'fail' && /다시 읽지 못했습니다/.test(prow(r).detail), '다시 읽기 실패 → ⚠ (던지지 않음)');
+  G.listStatus = 200;
+  r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: YF.planFinish({ pack: {}, thumbs: [], privacy: 'private' }), token });
+  ok(prow(r).status === 'skip', '비공개로 올렸으면 확인하지 않고 · 로 적는다');
+  r = await YF.finishVideo({ channelId: 'UC_A', videoId: 'V1', plan: YF.planFinish({ pack: {}, thumbs: [] }), token });
+  ok(!prow(r), '마무리만 다시(공개 상태 모름)는 공개 상태 줄이 없다');
+  ok(YF.planFinish({ pack: {}, thumbs: [], privacy: 'public' }).privacy === null, "planFinish 는 'public' 을 받지 않는다");
   server.close();
 
   console.log('\n[4] uploadVideo — publishAt 전송 규칙(원문 소스)');
@@ -102,6 +121,16 @@ const T = (s) => Date.parse(s);   // 'YYYY-MM-DDTHH:MM:SS+09:00' → 순간
   ok(/schedule: finish\.schedule/.test(M), 'runYtFinish 가 예약을 plan 에 싣는다');
   ok(/ytSchedule: \{ on: !!\(p\.ytSchedule/.test(A) && /ytSchedule: \{ on: !!\(ch\.ytSchedule/.test(A) && /data-testid="ch-yt-sched-on"/.test(A) && /data-testid="ch-yt-sched-time"/.test(A), '채널편집 예약 칸 — 읽기·저장·칸 셋 다');
   ok(!/\bytSchedule\b/.test(fs.readFileSync(path.join(ROOT, 'core', 'youtube-upload.js'), 'utf8')), '채널 값 해석은 yt-schedule 한 곳(업로드 모듈은 publishAt 만 받는다)');
+
+  console.log('\n[6] 👁 공개 상태 판정 — yt-schedule.privacyFor 한 곳(v1.0.58)');
+  ok(YS.privacyFor({}, null) === 'unlisted' && YS.privacyFor(null, null) === 'unlisted', '값이 없으면 기본 = 일부 공개');
+  ok(YS.privacyFor({ ytPrivacy: 'private' }, null) === 'private', '채널이 비공개를 고르면 비공개');
+  ok(YS.privacyFor({ ytPrivacy: 'unlisted' }, { publishAt: 'x' }) === 'private', '예약이 있으면 언제나 비공개');
+  ok(YS.privacyFor({ ytPrivacy: 'public' }, null) === 'unlisted', "⛔ 'public' 은 공개가 되지 않는다");
+  ok(/const privacy = noSchedule \? 'private' : YS\.privacyFor\(finish && finish\.preset, sched\)/.test(run) && /publishAt: sched \? sched\.publishAt : undefined, privacy,/.test(run), 'runYtUpload 한 곳에서 정해 uploadVideo 에 싣는다 · 2.0 주문은 비공개 그대로');
+  ok(/finish: \{ \.\.\.finish, privacy,/.test(run) && /privacy: finish\.privacy/.test(M), '확인표(runYtFinish)에 공개 상태를 넘긴다');
+  ok(/ytPrivacy: p\.ytPrivacy === 'private'/.test(A) && /ytPrivacy: ch\.ytPrivacy === 'private'/.test(A) && /data-testid="ch-yt-privacy"/.test(A), '채널편집 공개 상태 칸 — 읽기·저장·칸 셋 다');
+  ok(!/\bytPrivacy\b/.test(fs.readFileSync(path.join(ROOT, 'core', 'youtube-upload.js'), 'utf8')), '채널 값 ytPrivacy 해석은 yt-schedule 한 곳(업로드 모듈은 privacy 만 받는다)');
 
   console.log(`\n결과: ${pass} 통과 · ${fail} 실패`);
   process.exitCode = fail ? 1 : 0;

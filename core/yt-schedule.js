@@ -82,4 +82,14 @@ function planFor(channelId, schedule, now) {
   return ms == null ? null : { ms, publishAt: new Date(ms).toISOString(), kst: kst(ms), time: s.time };
 }
 
-module.exports = { MARGIN_MIN, storeFile, parseTime, normSchedule, kst, nextSlot, lastAssigned, recordAssigned, planFor };
+/**
+ * 👁 올릴 때 공개 상태(v1.0.58 · 로이 2026-11-18 「고정댓글을 달기 위함이니 일부 공개 올리기를 기본값으로」) — 한 곳.
+ *   채널 `ytPrivacy`: 'private'(비공개)만 비공개 · 그 밖(값 없음 포함) = 'unlisted'(일부 공개 · 기본).
+ *   ⛔ 'public' 은 받지 않는다(공개 즉시 업로드 금지 — 로이 결정 전).
+ *   예약(sched)이 있으면 언제나 비공개 — 구글이 publishAt 을 private 과 함께만 받는다.
+ */
+const PRIVACY_LABEL = { unlisted: '일부 공개', private: '비공개' };
+function normPrivacy(v) { return v === 'private' ? 'private' : 'unlisted'; }
+function privacyFor(preset, sched) { return sched ? 'private' : normPrivacy(preset && preset.ytPrivacy); }
+
+module.exports = { MARGIN_MIN, storeFile, parseTime, normSchedule, kst, nextSlot, lastAssigned, recordAssigned, planFor, PRIVACY_LABEL, normPrivacy, privacyFor };

@@ -169,7 +169,7 @@ const server = http.createServer(async (req, res) => {
   ok(Buffer.concat(G.received).equals(data), '🔑 받은 바이트가 원본과 정확히 같다(끊긴 뒤 이어받아도)');
   ok(G.failed503 && G.statusQueries >= 1, '503 뒤 「어디까지 받았나」 조회 후 이어 올림');
   ok(G.refreshCalls >= 1, '401 → 토큰 갱신 후 계속');
-  ok(G.meta.status.privacyStatus === 'private', '🔒 비공개로 보낸다');
+  ok(G.meta.status.privacyStatus === 'private', '🔒 privacy 를 안 주면 비공개로 보낸다(모듈 기본 · 2.0 주문 길)');
   ok(G.meta.status.containsSyntheticMedia === true, '🤖 AI 합성 콘텐츠 = 예');
   ok(G.meta.status.selfDeclaredMadeForKids === false, '아동용 아님');
   ok(G.meta.snippet.title === '추방당한 단테는 왜', '제목: 꺾쇠·줄바꿈 제거');
@@ -179,6 +179,15 @@ const server = http.createServer(async (req, res) => {
   ok(prog.some((p) => p.phase === 'upload' && p.sent > 0 && p.sent < p.total) && prog[prog.length - 1].phase === 'done', '진행 이벤트(upload → done)');
   ok(YT.findUploaded('UC_TEST_1', mp4) && YT.findUploaded('UC_TEST_1', mp4).videoId === 'VID_OK_1', '올린 기록 → 같은 파일 재업로드 판정');
   ok(!YT.findUploaded('UC_OTHER', mp4), '다른 채널이면 기록 없음');
+
+  console.log('\n[4b] 👁 공개 상태(v1.0.58) — 실제로 보낸 값');
+  const up = (extra) => YT.uploadVideo({ channelId: 'UC_TEST_1', file: mp4, title: '공개 상태 시험', chunkSize: 256 * 1024, backoff: [0.01], ...extra });
+  r = await up({ privacy: 'unlisted' });
+  ok(r.ok && G.meta.status.privacyStatus === 'unlisted', '👁 privacy:unlisted → 일부 공개로 보낸다');
+  r = await up({ privacy: 'unlisted', publishAt: new Date(Date.now() + 86400e3).toISOString() });
+  ok(r.ok && G.meta.status.privacyStatus === 'private' && !!G.meta.status.publishAt, '예약이 실리면 일부 공개를 줘도 비공개(구글 규칙)');
+  r = await up({ privacy: 'public' });
+  ok(r.ok && G.meta.status.privacyStatus === 'private', "⛔ privacy:'public' 은 받지 않는다 → 비공개");
 
   console.log('\n[5] 실패는 사람 말 · 던지지 않는다');
   G.beginStatus = 403; G.beginBody = { error: { errors: [{ reason: 'quotaExceeded' }], message: 'quota' } };

@@ -55,7 +55,7 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     await win.waitForTimeout(700);
     const card = win.locator('.modal-card.tabbed').first();
     const heights = {};
-    for (const t of ['🏠', '🎙', '📝', '🖼', '📁']) {
+    for (const t of ['📋', '🏠', '📝', '🖼', '📁']) {   // v0.9.84 — 🎙 음성 탭은 「🏠 기본·음성」으로 합쳐졌다
       await card.locator(`button:has-text("${t}")`).first().click();
       await win.waitForTimeout(250);
       heights[t] = await card.evaluate((el) => Math.round(el.getBoundingClientRect().height));
@@ -63,7 +63,12 @@ const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail
     const row = card.locator('[data-testid="yt-card"]');   // v0.9.18 가로 카드 한 줄(옛 「업로드채널」 줄)
     ok(await row.count() === 1, '📁 폴더 탭에 ⬆ 업로드 카드');
     ok(await row.locator('[data-testid="ch-yt-playlist"]').count() === 1, '🧷 업로드 카드에 재생목록 이름 칸(v0.9.33)');
-    const sel = row.locator('select');
+    // 👁 공개 상태 칸(v1.0.58) — 일부 공개·비공개 둘만(⛔ 공개) · 값이 없는 채널은 일부 공개로 보인다
+    const pv = row.locator('[data-testid="ch-yt-privacy"]');
+    const pvOpts = await pv.locator('option').evaluateAll((os) => os.map((o) => o.value));
+    ok(await pv.count() === 1 && pvOpts.join() === 'unlisted,private', `👁 공개 상태 칸 = 일부 공개·비공개 (${pvOpts.join()})`);
+    ok(['unlisted', 'private'].includes(await pv.inputValue()), `공개 상태 값이 둘 중 하나 (${await pv.inputValue()})`);
+    const sel = row.locator('select').first();
     const firstOpt = await sel.locator('option').first().textContent();
     ok(st.channels.length ? /올릴 채널/.test(firstOpt) : /연결 없음/.test(firstOpt), `채널 목록 첫 줄: 「${firstOpt}」`);
     ok(await sel.locator('option').count() >= 1 + st.channels.length, '연결된 채널이 목록에 나온다');
