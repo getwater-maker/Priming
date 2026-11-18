@@ -2,12 +2,12 @@
 /**
  * today-scripts.js — 📅 오늘 작업할 대본 찾기(v0.9.85 · 로이 2026-10-20)
  *
- * 규칙(한 곳): **채널마다 「게시일 ≥ 오늘(KST)」인 대본 가운데 아직 안 만든 가장 이른 날짜의 대본.**
+ * 규칙(한 곳): **채널마다 「게시일 ≥ 오늘(KST)」인 대본 가운데 아직 안 만든 편 전부**(v1.0.60 · 로이 2026-11-18 「전부 보이게」 — 옛 「가장 이른 한 편」 폐기).
+ *   목록·큐 순서 = 게시일이 이른 편부터(채널이 섞인다 · 같은 날은 채널 순서 → 이름순) — ⚡ 만들기가 큐 순서대로 만든다.
  *   - 게시일 = 파일 이름 속 날짜 — `[고전_1021] …` 의 MMDD(_ 또는 [ 뒤 네 자리 + ] 또는 공백) 또는 `2026-10-21` 꼴.
  *     MMDD 의 연도는 경로의 `2026_10` 폴더를 먼저 보고, 없으면 오늘에서 반년 안쪽 연도로 잡는다(연말 → 1월 대본).
  *   - 폴더는 채널 「대본 폴더」(scriptFolder) 아래를 3단계까지 — `_`·`.` 로 시작하는 폴더(`_폐기` 등)는 건너뛴다.
  *   - 「만들었다」 판정은 부르는 쪽(main)이 넘긴다(.vrew · 같은 이름 MP4 · 업로드 기록) — 이 파일은 fs 읽기만.
- *   - 같은 채널에 가장 이른 날짜 대본이 여럿이면 그날 것은 모두 고른다.
  *   - 📦 항목마다 `pack`(packagingStatus) — 패키징이 미완이면 화면은 보여만 주고 큐에 넣지 않는다(main open-scripts-list 도 다시 막는다 · v1.0.55).
  * 테스트: test/today-scripts.test.js
  */
@@ -69,24 +69,21 @@ function scanFolder(root, today = kstToday()) {
 }
 
 /**
- * 채널 하나의 다음 대본 — files 중 date ≥ today 이고 isMade 가 거짓인 가장 이른 날짜의 것(여럿이면 그날 전부).
- * → { picks:[file], waiting: 그 뒤로 남은 안 만든 편 수, madeAhead: 오늘 이후인데 이미 만든 편 수 }
+ * 채널 하나의 안 만든 편 — files 중 date ≥ today 이고 isMade 가 거짓인 것 전부(게시일 → 이름순).
+ * → { picks:[file], madeAhead: 오늘 이후인데 이미 만든 편 수 }
  */
 function pickNext(files, today, isMade) {
   const fut = (files || []).filter((f) => f.date >= today)
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.name.localeCompare(b.name, 'ko', { numeric: true })));
   const todo = [], made = [];
   for (const f of fut) (isMade(f) ? made : todo).push(f);
-  if (!todo.length) return { picks: [], waiting: 0, madeAhead: made.length };
-  const d0 = todo[0].date;
-  const picks = todo.filter((f) => f.date === d0);
-  return { picks, waiting: todo.length - picks.length, madeAhead: made.length };
+  return { picks: todo, madeAhead: made.length };
 }
 
 /**
  * 채널들 → 오늘 작업할 대본 목록.
  * channels: [{name, folder}] · isMade(file, channelName) → bool · opts = { thumbRoot }(📦 패키징 판정의 썸네일 폴더)
- * → { today, items:[{channel, path, name, date, waiting, madeAhead, pack}], empty:[{channel, reason}] }
+ * → { today, items:[{channel, path, name, date, madeAhead, pack}](게시일 → 채널 순서 → 이름순), empty:[{channel, reason}] }
  */
 function findToday(channels, isMade, today = kstToday(), opts = {}) {
   const thumbIndex = thumbIndexOf(opts.thumbRoot);   // 썸네일 폴더는 한 번만 읽는다
@@ -96,8 +93,11 @@ function findToday(channels, isMade, today = kstToday(), opts = {}) {
     const files = scanFolder(ch.folder, today);
     const r = pickNext(files, today, (f) => !!isMade(f, ch.name));
     if (!r.picks.length) { empty.push({ channel: ch.name, reason: r.madeAhead ? `앞으로 ${r.madeAhead}편 모두 만듦` : '오늘 이후 대본 없음' }); continue; }
-    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, waiting: r.waiting, madeAhead: r.madeAhead, pack: packagingStatus(f.path, { thumbIndex }) });
+    for (const f of r.picks) items.push({ channel: ch.name, path: f.path, name: f.name, date: f.date, madeAhead: r.madeAhead, pack: packagingStatus(f.path, { thumbIndex }), _ord: (channels || []).indexOf(ch) });
   }
+  // 게시일이 이른 편부터 — 같은 날은 채널 목록 순서, 그다음 이름순(채널 안 순서는 pickNext 가 이미 정했다)
+  items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a._ord - b._ord || a.name.localeCompare(b.name, 'ko', { numeric: true })));
+  for (const it of items) delete it._ord;
   return { today, items, empty };
 }
 

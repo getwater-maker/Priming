@@ -22,18 +22,18 @@ ok(T.dateOf('1909년 지드의 좁은 문', '', '2026-10-20') === null, '제목 
 ok(T.dateOf('대본', '', '2026-10-20') === null, '날짜 없는 이름');
 ok(T.kstToday(Date.UTC(2026, 9, 20, 15, 30)) === '2026-10-21', 'KST 자정 넘김(UTC 15:30 = KST 00:30 다음 날)');
 
-// [2] 고르기
+// [2] 고르기 — 안 만든 편 전부(v1.0.60 · 로이 「전부 보이게」 · 옛 「가장 이른 한 편」 폐기)
 const F = (name, date) => ({ name, date, path: name + '.md' });
-const files = [F('a1019', '2026-10-19'), F('a1020', '2026-10-20'), F('a1021', '2026-10-21'), F('a1022', '2026-10-22'), F('a1024', '2026-10-24')];
+const files = [F('a1019', '2026-10-19'), F('a1022', '2026-10-22'), F('a1020', '2026-10-20'), F('a1021', '2026-10-21'), F('a1024', '2026-10-24')];
 let r = T.pickNext(files, '2026-10-20', (f) => f.name === 'a1020' || f.name === 'a1021');
-ok(r.picks.length === 1 && r.picks[0].name === 'a1022', '오늘·내일 만들었으면 1022 — got ' + r.picks.map((x) => x.name));
-ok(r.waiting === 1 && r.madeAhead === 2, '대기 1 · 미리 만듦 2');
+ok(r.picks.map((x) => x.name).join() === 'a1022,a1024', '오늘·내일 만들었으면 1022·1024 둘 다(게시일 순) — got ' + r.picks.map((x) => x.name));
+ok(r.madeAhead === 2 && r.waiting === undefined, '미리 만듦 2 · 「대기」 칸은 없다');
 r = T.pickNext(files, '2026-10-20', () => false);
-ok(r.picks[0].name === 'a1020', '아무것도 안 만들었으면 오늘 것(어제 것은 지나감)');
+ok(r.picks.map((x) => x.name).join() === 'a1020,a1021,a1022,a1024', '아무것도 안 만들었으면 오늘 이후 네 편 전부(어제 것은 지나감) — got ' + r.picks.map((x) => x.name));
 r = T.pickNext(files, '2026-10-20', () => true);
 ok(!r.picks.length && r.madeAhead === 4, '다 만들었으면 없음');
 r = T.pickNext([F('b', '2026-10-21'), F('a', '2026-10-21'), F('c', '2026-10-22')], '2026-10-20', () => false);
-ok(r.picks.length === 2 && r.picks[0].name === 'a', '같은 날 두 편이면 둘 다(이름순)');
+ok(r.picks.map((x) => x.name).join() === 'a,b,c', '같은 날은 이름순 · 다음 날 것도 함께 — got ' + r.picks.map((x) => x.name));
 
 // [3] 폴더 훑기 — `_폐기`·`.` 폴더 제외 · 하위 폴더 · 채널 여럿
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'today-scripts-'));
@@ -54,8 +54,12 @@ try {
     { name: '없는채널', folder: path.join(root, '없음') },
   ], (f) => /오늘/.test(f.name), '2026-10-20');
   const names = res.items.map((x) => x.channel + ':' + x.name);
-  ok(names.length === 2 && names.includes('고전:[고전_1021] 내일') && names.includes('서재:[서재_1023] 4부'), '채널마다 다음 편 — got ' + names);
-  ok(res.items.find((x) => x.channel === '고전').waiting === 1, '고전 대기 1편');
+  ok(names.join() === '고전:[고전_1021] 내일,고전:[고전_1022] 모레,서재:[서재_1023] 4부', '채널마다 안 만든 편 전부 · 게시일 순 — got ' + names);
+  // 채널이 섞여도 게시일이 이른 편부터(⚡ 만들기가 큐 순서대로 만든다) · 같은 날은 채널 목록 순서
+  w('서재/노생거사원/[서재_1021] 3부.md');
+  const res2 = T.findToday([{ name: '고전', folder: path.join(root, '고전') }, { name: '서재', folder: path.join(root, '서재') }], (f) => /오늘/.test(f.name), '2026-10-20');
+  ok(res2.items.map((x) => x.name).join() === '[고전_1021] 내일,[서재_1021] 3부,[고전_1022] 모레,[서재_1023] 4부', '채널이 섞여도 게시일 순 · 같은 날은 채널 순서 — got ' + res2.items.map((x) => x.name));
+  ok(res2.items.every((x) => !('_ord' in x)), '정렬용 칸은 밖으로 나가지 않는다');
   ok(res.empty.length === 1 && res.empty[0].reason === '대본 폴더 없음', '폴더 없는 채널은 빈 칸 사유');
 } finally { fs.rmSync(root, { recursive: true, force: true }); }
 
@@ -111,7 +115,8 @@ try {
   ok(T.packagingStatus(a).missing.join() === '썸네일 폴더(⚙ 설정 → 📁 폴더)', '썸네일 폴더를 안 주면 미완(fail-closed)');
   ok(T.packagingStatus(a, { thumbRoot: path.join(root5, '없는폴더') }).missing.join() === '썸네일 폴더(⚙ 설정 → 📁 폴더)', '없는 썸네일 폴더 = 미완');
   const res = T.findToday([{ name: '테스', folder: path.join(ch, '대본') }], () => false, '2026-11-20', O);
-  ok(res.items.length === 1 && res.items[0].pack && res.items[0].pack.ok === true, 'findToday 항목에 pack 이 실린다');
+  ok(res.items.length > 1 && res.items.every((x) => x.pack) && res.items[0].name === '[테스_1120] 완료' && res.items[0].pack.ok === true, 'findToday 항목마다 pack 이 실린다(안 만든 편 전부)');
+  ok(res.items.some((x) => x.pack.ok) && res.items.some((x) => !x.pack.ok), '완료·미완이 한 목록에 함께 나온다(미완은 화면이 고를 수 없게)');
 } finally { fs.rmSync(root5, { recursive: true, force: true }); }
 // 연결 — main 이 큐에 넣기 전에 다시 막는다 · 화면은 pack.ok 로만 고르게 한다(다시 판정하지 않음)
 ok(/open-scripts-list[\s\S]{0,900}packagingStatus\(x\.path, \{ thumbRoot: thumbRoot\(\) \}\)[\s\S]{0,200}if \(!pk\.ok\)[^\n]*continue/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다');
