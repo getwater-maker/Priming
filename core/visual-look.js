@@ -50,6 +50,48 @@ function normFxGroup(v) { if (v === 'off') return 'off'; const n = Math.round(Nu
 const FILL_IDS = new Set(FILLS.map((x) => x.id));
 const MOTION_IDS = new Set(MOTIONS.map((x) => x.id));
 
+// 🔊 그룹 영상 소리 선택(v1.0.61 · 로이 2026-11-18) — 이 그룹에서 TTS 내레이션과 **영상 자체의 소리(음악·효과음·대사)** 중 무엇을 내보낼지.
+//   look.vsound = { mode: 'video' | 'mix', vol: 0~200 } — 없음 = 지금까지의 동작(내레이션만 · 영상은 음소거).
+//   · 'video' = 영상 소리만(그 그룹 문장의 TTS 는 무음 처리 — 길이·자막 시각은 그대로) · 'mix' = 내레이션 + 영상 소리(영상은 낮게).
+//   · 영상에 소리 트랙이 없으면 빌더가 내레이션을 끄지 않는다(fail-closed — 말이 사라지지 않게).
+//   ⚠ 렌더러 번들에도 들어간다 — 순수 계산만.
+//   🔊 v1.0.61 덧붙임(로이 2026-11-18 「TTS 를 줄이고 비디오 소리를 올려서」): 'mix' 는 내레이션 음량(nar)도 고른다 ·
+//   채널 기본값(채널 편집 ▸ 제작 도구 「🔊 영상 소리」 = preset.videoSound)이 있으면 그룹에 값이 없을 때 그걸 따른다 ·
+//   그룹의 { mode:'tts' } = 「채널 기본값과 상관없이 내레이션만」(명시) — 판정은 effVsound 한 곳.
+const VSOUND_MODES = [
+  { id: 'tts', label: '내레이션(TTS)만', hint: '영상 소리는 끈다(지금까지의 동작)' },
+  { id: 'video', label: '영상 소리만', hint: '이 그룹은 영상이 내는 소리(대사·음악)만 — 내레이션은 무음 · 자막과 길이는 그대로' },
+  { id: 'mix', label: '내레이션 + 영상 소리', hint: '내레이션은 줄이고 영상 소리를 함께 깐다(두 음량을 따로 고른다)' },
+];
+const VSOUND_DEFAULT_VOL = { video: 100, mix: 100 };
+const VSOUND_DEFAULT_NAR = 50;   // 「섞기」 내레이션 기본 음량(%) — 로이: TTS 는 줄이고 영상 소리는 올려서
+const _pct = (v, dflt) => { const n = Number(v); return (v != null && v !== '' && isFinite(n)) ? Math.max(0, Math.min(200, Math.round(n))) : dflt; };
+function normVsound(v) {
+  if (typeof v === 'string') v = { mode: v };
+  if (!v || typeof v !== 'object') return null;
+  if (v.mode === 'tts') return { mode: 'tts' };   // 명시 「내레이션만」(채널 기본값을 이긴다)
+  const mode = v.mode === 'video' || v.mode === 'mix' ? v.mode : null;
+  if (!mode) return null;
+  const vol = _pct(v.vol, VSOUND_DEFAULT_VOL[mode]);
+  return mode === 'mix' ? { mode, vol, nar: _pct(v.nar, VSOUND_DEFAULT_NAR) } : { mode, vol };
+}
+/** 채널 기본값(preset.videoSound) — 내레이션만(= 지금까지)이면 null */
+function normChanVsound(v) { const n = normVsound(v); return n && n.mode !== 'tts' ? n : null; }
+/** 🔑 이 그룹에 실제로 쓸 영상 소리 — 그룹 값 > 채널 기본값 · 내레이션만이면 null(빌더·영상 생성·화면이 이것 하나로 판정) */
+function effVsound(g, chan) {
+  const own = normVsound(g && g.look && g.look.vsound);
+  if (own) return own.mode === 'tts' ? null : own;
+  return normChanVsound(chan);
+}
+/** 그룹 자기 값만(채널 기본값 없이) — 없으면 null */
+function vsoundOf(g) { return effVsound(g, null); }
+/** 사람이 읽는 한 줄 — '영상 소리만 100%' · '내레이션 50% + 영상 100%' · '내레이션만' */
+function vsoundLabel(v) {
+  const n = normVsound(v);
+  if (!n || n.mode === 'tts') return '내레이션만';
+  return n.mode === 'video' ? `영상 소리만 ${n.vol}%` : `내레이션 ${n.nar}% + 영상 ${n.vol}%`;
+}
+
 /** 📐 ① 칸에서 옮기고 줄인 자리(캔버스 0..1 · 넘쳐도 된다) — 이상하면 null */
 function normBox(b) {
   if (!b || typeof b !== 'object') return null;
@@ -84,13 +126,15 @@ function normLook(l) {
   if (bgc) out.bg = bgc;   // 🎨 클립 배경색(기본 = 필드 없음 · look.box 가 있으면 저장은 하되 쓰지 않는다)
   const ks = normKbSegGroup(o.kbSeg);
   if (ks) out.kbSeg = ks;   // 없음(채널 설정대로)이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로)
+  const vs = normVsound(o.vsound);
+  if (vs) out.vsound = vs;   // 🔊 영상 소리 선택(기본 = 필드 없음 = 내레이션만)
   return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer && n.opacity == null && !n.crop;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer && n.opacity == null && !n.crop && !n.vsound;
 }
-function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : '') + (normLook(l).opacity != null ? ` · 불투명도 ${normLook(l).opacity}%` : '') + (normLook(l).crop ? ' · 자르기' : ''); }
+function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : '') + (normLook(l).opacity != null ? ` · 불투명도 ${normLook(l).opacity}%` : '') + (normLook(l).crop ? ' · 자르기' : '') + (normLook(l).vsound ? ` · 🔊 ${normLook(l).vsound.mode === 'tts' ? '내레이션만(채널 기본값 무시)' : vsoundLabel(normLook(l).vsound)}` : ''); }
 function _describeBase(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
@@ -190,4 +234,4 @@ function ovBox(o, w, h, cW, cH) {
 /** 삽입 그림의 켄번스 종류(그룹 MOTIONS 의 in·out·lr·rl·bt·tb) — 이상하면 '' */
 const normOvMotion = (m) => (OV_MOTIONS.includes(m) ? m : '');
 
-module.exports = { OV_MOTIONS, normCrop, normOpacity, cropVis, cropInset, parseInset, ovBox, normOvMotion, FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+module.exports = { VSOUND_MODES, VSOUND_DEFAULT_VOL, VSOUND_DEFAULT_NAR, normVsound, normChanVsound, effVsound, vsoundOf, vsoundLabel, OV_MOTIONS, normCrop, normOpacity, cropVis, cropInset, parseInset, ovBox, normOvMotion, FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

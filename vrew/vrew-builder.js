@@ -912,6 +912,8 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   };
   _VS.markCovered(_vsProj, (x) => !!((x.videoPath && fs.existsSync(x.videoPath)) || (x.imagePath && fs.existsSync(x.imagePath))));
   const _transByTrack = {};   // 🎬 trackId → {type, sec} — .vrew 는 담지 못해 옆 파일(<이름>.vrew.fx.json)로 렌더러에 넘긴다
+  const _narVol = new Map();   // 🔊 영상 소리를 고른 그룹의 영상이 덮는 문장 id → 내레이션 배율(영상 소리만 = 0 · 섞기 = nar%) — 그 문장의 TTS 는 볼륨 사본으로(길이·자막은 그대로)
+  const _VLk = require('../core/visual-look');
   for (const g of groups) {
     // (a) 비디오가 있으면 비디오 자산 + video/videoAudio 두 트랙 생성 (음소거)
     //     9:16 쇼츠 캔버스: 세로 영상만 사용(가로 16:9 영상은 흰 여백 → 이미지 폴백).
@@ -921,6 +923,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       //   크면 반복 + 이음새 크로스페이드). 전엔 🎬 MP4 가 남는 시간 동안 마지막 프레임에서 멈췄다(2026-09-24).
       //   원본 g.videoPath 는 그대로 — 맞춘 파일은 캐시에 둔다. 실패하면 원본(예전 동작).
       let _vsrc = g.videoPath;
+      const _vsnd = _VLk.effVsound(g, opts.videoSound);   // 🔊 영상 소리 선택(그룹 값 > 채널 기본값 · 있으면 길이 맞추기도 영상의 소리를 지키며 한다)
       let _vmeta0 = readMp4VideoMeta(_vsrc);
       // 🔴 v0.5.50 — 그림 범위를 편 끝까지 늘린 5초 영상을 18분짜리 파일로 새로 구웠다(620MB) → .vrew 가 부풀어 Vrew 가 열다 멈췄다.
       //   맞출 길이가 FIT_MAX_SEC 를 넘으면 파일을 늘리지 않고 **Vrew 의 반복 재생**(샘플.vrew: sourceOut = 파일 길이 + endBehavior loop)에 맡긴다.
@@ -932,7 +935,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
           log(`🎞 G${g.num} 영상 ${_vmeta0.duration.toFixed(1)}초 → ${_gd.toFixed(0)}초 구간은 Vrew 반복 재생으로(파일은 그대로)`);
         } else if (_gd > 0) {
           try {
-            const fit = await require('../core/video-fit').fitVideo(_vsrc, _vmeta0.duration, _gd, { log, label: `G${g.num} ` });
+            const fit = await require('../core/video-fit').fitVideo(_vsrc, _vmeta0.duration, _gd, { log, label: `G${g.num} `, keepAudio: !!_vsnd });
             if (fit.path !== _vsrc) { const m2 = readMp4VideoMeta(fit.path); if (m2) { _vsrc = fit.path; _vmeta0 = m2; } }
           } catch (e) { log(`⚠ G${g.num} 영상 길이 맞추기 오류: ${e.message}`); }
         }
@@ -1035,11 +1038,26 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
         fillType: 'cut',                 // 트랙 박스가 영상 비율과 동일 → cut 이어도 잘리지 않고 전체 표시
       };
       CE.applyToTrack(pj.props.tracks[videoTid], g.look);   // 🎛 확대·회전(영상 그룹도 같다)
-      // 비디오 오디오 트랙 — volume:0 (PrimingFlow TTS 만 들리도록 음소거)
+      // 비디오 오디오 트랙 — 기본 volume:0 (PrimingFlow TTS 만 들리도록 음소거)
+      //   🔊 look.vsound(영상 소리 선택 · v1.0.61)가 있고 **영상에 소리 트랙이 있을 때만** 그 음량으로 켠다 — 대사가 되풀이되지 않게 반복(loop)은 끈다.
+      //   「영상 소리만」이면 영상이 덮는 문장의 TTS 를 무음 사본으로(아래 _narVol · 「섞기」는 nar% 로 줄인 사본). 영상에 소리가 없으면 내레이션을 끄지 않는다(말이 사라지지 않게).
+      let _vaVol = 0, _vaLoop = true;
+      if (_vsnd) {
+        if (await require('../core/media-utils').hasAudioStream(_vsrc)) {
+          _vaVol = _vsnd.vol / 100; _vaLoop = false;
+          let _nMute = 0;
+          const _f = _vsnd.mode === 'video' ? 0 : (_vsnd.nar != null ? _vsnd.nar : 100) / 100;
+          if (Math.abs(_f - 1) > 0.004) {
+            const _rg = _VS.effRange(_vsProj, groups.indexOf(g), _vsCtx, _hasVisF);
+            if (_rg) for (let k = _rg.a; k <= _rg.b; k++) { const _id = _vsCtx.order[k]; if (_id != null && !_narVol.has(_id)) { _narVol.set(_id, _f); _nMute++; } }
+          }
+          log(`[Vrew] 🔊 G${g.num} 영상 소리 ${_vsnd.mode === 'video' ? `만(내레이션 ${_nMute}문장 무음)` : `+ 내레이션 ${_vsnd.nar}%(${_nMute}문장)`} · 음량 ${_vsnd.vol}%`);
+        } else log(`[Vrew] ⚠ G${g.num} 영상에 소리가 없어 「영상 소리」 선택을 건너뜁니다 — 내레이션(TTS)을 그대로 씁니다(소리를 켠 채 영상을 다시 만들어야 합니다)`);
+      }
       pj.props.tracks[audioTid] = {
         trackId: audioTid, mediaId: mid,
-        volume: 0, sourceIn: 0, sourceOut: dur,
-        loop: true, playbackRate: 1, type: 'videoAudio',
+        volume: _vaVol, sourceIn: 0, sourceOut: dur,
+        loop: _vaLoop, playbackRate: 1, type: 'videoAudio',
       };
       if (CE.normTrans(g.look && g.look.trans)) _transByTrack[videoTid] = CE.normTrans(g.look.trans);   // 🎬 화면 전환(MP4 만) — 영상 그룹
       pj.props.assets[aid] = { trackIds: [videoTid, audioTid], role: 'sub' };
@@ -1203,9 +1221,16 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const clipDurations = []; // index = transcript clip 순번 (0-based), value = 초
 
   // ★ WAV→MP3 를 빌드 루프 전에 병렬 사전 변환 (직렬 spawnSync 9분 → 병렬 수십 초). MP3 출력 유지.
-  const _mp3Cache = await preConvertWavsToMp3(sentences, log, 8);
+  //   🔊 「영상 소리만」 그룹의 문장은 볼륨 0 사본(무음 MP3)으로 — 문장 객체·원본 음성 파일은 그대로(복사본만 바꾼다)
+  //   「섞기」는 내레이션 배율(nar%)을 문장 볼륨(s.vol)에 곱한다 — 0~2 범위 · 1 초과는 빌더의 피크 여유 규칙 그대로
+  const _sentsA = _narVol.size ? sentences.map((s) => {
+    if (!_narVol.has(s.id)) return s;
+    const _b = CE.normVol(s.vol); const _v = Math.max(0, Math.min(2, (_b == null ? 1 : _b) * _narVol.get(s.id)));
+    return Object.assign(Object.create(Object.getPrototypeOf(s)), s, { vol: _v });
+  }) : sentences;
+  const _mp3Cache = await preConvertWavsToMp3(_sentsA, log, 8);
 
-  for (const s of sentences) {
+  for (const s of _sentsA) {
     if (!s.ttsAudioPath || !fs.existsSync(s.ttsAudioPath)) {
       missingTts.push(s.num);
       continue;

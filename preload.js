@@ -59,6 +59,7 @@ contextBridge.exposeInMainWorld('api', {
   remotionRunImages: (args) => ipcRenderer.invoke('remotion-run-images', args),
   remotionRunVideos: (args) => ipcRenderer.invoke('remotion-run-videos', args),
   editGroupImage: (args) => ipcRenderer.invoke('edit-group-image', args),
+  upscaleGroup: (args) => ipcRenderer.invoke('upscale-group', args),   // ⬆ 그룹 하나 업스케일(영상 있으면 영상 · 없으면 그림)
   remotionSelectTsv: (args) => ipcRenderer.invoke('remotion-select-tsv', args),
   remotionRunAll: (args) => ipcRenderer.invoke('remotion-run-all', args),
   onRemotionActive: (cb) => ipcRenderer.on('remotion-active', (_e, d) => cb(d)),

@@ -188,7 +188,7 @@ function getPreset(name) {
   return name ? all.find((p) => p.name === name) || null : presetStore.getDefault();
 }
 function listPresets() {
-  return presetStore.loadAll().map((p) => ({ name: p.name, engine: p.engine, isDefault: !!p.isDefault, group: p.group || '', startMode: p.startMode || 'longform' }));
+  return presetStore.loadAll().map((p) => ({ name: p.name, engine: p.engine, isDefault: !!p.isDefault, group: p.group || '', startMode: p.startMode || 'longform', videoSound: require('./visual-look').normChanVsound(p.videoSound) }));   // 🔊 채널 기본 영상 소리(② 그룹 메뉴 「볼륨」이 「채널 기본값」으로 보여 준다)
 }
 
 // ── TTS 매니저 (연결 완료 보장) ──────────────────────────
@@ -824,6 +824,7 @@ function vrewInputsOf(project, preset, captionMaxChars) {
     if (preset.captionStyle) inp.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) inp.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, null);
     if (preset.disableLongSplit != null) inp.disableLongSplit = preset.disableLongSplit;
+    { const vs = require('./visual-look').normChanVsound(preset.videoSound); if (vs) inp.videoSound = vs; }   // 🔊 채널 기본 영상 소리(v1.0.61) — 내레이션만(기본)이면 넣지 않는다(옛 지문 그대로)
     // 🎞 채널 화면 연출(켄번스 구간 · 디졸브 · 오버레이 모션)은 v0.9.18 에 뺐다(로이 2026-10-14) — 채널 값(kbSeg·dissolveSec·fx)을 읽지 않는다.
     //   ⛔ 다시 읽게 하지 말 것(채널편집에 칸이 없어 숨은 채로 적용된다 · 06_고전서재에 디졸브 4초가 남아 있다). 그룹별 look.kbSeg 는 그대로.
     if (preset.infoCards) { inp.infoCards = true; inp.infoLook = 2; /* 2 = 표 줄 강조·체크 찍기·숫자 강조(v0.9.106) — 그리는 법이 바뀌면 올린다 */ if (Array.isArray(project.infoMarks) && project.infoMarks.length) inp.info = project.infoMarks; }   // 📇 정보 카드 — MP4 가 달라지므로 지문에(.vrew 는 그대로)
@@ -845,6 +846,7 @@ async function buildProjectVrew(project, vrewPath, preset, logger, captionMaxCha
     if (preset.captionStyle) opts.captionStyle = preset.captionStyle;
     if (preset.aiNotice && preset.aiNotice.enabled) opts.aiNotice = require('./visual-look').aiNoticeForRange(preset.aiNotice, project, logger);
     if (preset.disableLongSplit != null) opts.disableLongSplit = preset.disableLongSplit;
+    { const vs = require('./visual-look').normChanVsound(preset.videoSound); if (vs) opts.videoSound = vs; }   // 🔊 채널 기본 영상 소리 — 그룹 값이 없을 때(빌더 effVsound)
     // 🎞 채널 켄번스 구간은 읽지 않는다(v0.9.18 — 위 vrewInputsOf 와 같은 규칙)
     if (preset.bgm && preset.bgm.enabled && preset.bgm.audioPath) opts.bgm = preset.bgm;   // 🎵 main.resolveBgm 이 고른 곡
     { const lg = require('./overlay-layers').effLogo(preset.logo, project); if (lg.enabled && lg.path) opts.logo = { ...lg, side: project.logoSide === 'left' ? 'left' : 'right', pos: require('./overlay-layers').posOfLogo(lg, project) }; }   // 🏷 채널 로고(또는 이 대본 덮어쓰기 logoOver) · 자리는 대본마다

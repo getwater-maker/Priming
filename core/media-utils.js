@@ -103,6 +103,17 @@ async function getMediaInfo(filePath) {
 }
 
 /**
+ * 🔊 파일에 소리(오디오) 트랙이 있는가 — ffmpeg -i 의 스트림 목록으로 본다. 파일이 없거나 못 읽으면 false(소리 없음으로 본다).
+ *   그룹 영상 소리 선택(look.vsound)이 영상에 소리가 있을 때만 내레이션을 끄도록 하는 판정이다.
+ */
+async function hasAudioStream(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return false;
+  let info = '';
+  try { info = await _probeFfmpeg(filePath); } catch { return false; }
+  return /Stream #\d+:\d+.*Audio:/.test(info);
+}
+
+/**
  * 📺 영상 파일 실측(2.0 주문 결과서 ⑯ ㉔ · v1.0.22) — ffmpeg 머리 정보(ffprobe 와 같은 libavformat 값)를 읽는다.
  *   videoKbps = 영상 흐름 비트레이트(mp4 가 적어 둔 값) · totalKbps = 파일 크기 × 8 ÷ 길이(소리 포함 평균).
  * @returns {Promise<{width,height,fps,videoKbps,totalKbps,durationSec,bytes}|null>}
@@ -274,6 +285,7 @@ async function concatAudio(inPaths, outPath) {
 
 module.exports = {
   probeVideo,
+  hasAudioStream,
   getFfmpegPath,
   tmpFile,
   getMediaInfo,

@@ -9,6 +9,7 @@
 //   usd     = 이미지 장당 · usdSec = 영상 초당 · usdByDur = 영상 편당(길이별)
 //   durs    = 비디오가 받는 길이(초) — MAX_SEC 를 넘는 길이는 쓰지 않는다(그보다 긴 그룹은 video-fit 이 늘리거나 반복)
 //   🔇 그룹 영상은 내레이션과 겹쳐 음소거하므로(로이 확정) 소리를 끌 수 있는 모델은 끈다(값도 싸다).
+//      단 그룹이 「영상 소리」를 골랐으면(look.vsound · v1.0.61) 그 그룹만 소리를 켜고 만든다(o.sound — soundOf 가 'flag' 인 모델).
 
 const PREFIX = 'kie:';
 const MAX_SEC = 8;   // 영상 한 편 최대 길이 — ComfyUI 영상(videoMaxSec 8)과 같다 · 길이가 요금을 정한다(메모: 8→5초가 최대 절감)
@@ -52,21 +53,21 @@ const AR_V = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'];
 const VIDEO = [
   { id: 'seedance-2-5', label: 'Seedance 2.5 · 720p', model: 'bytedance/seedance-2-5', usdSec: 63 * CR, durs: range(4, 30),
     note: '소리 끔으로 요청 — 표의 값은 소리 포함 가격이라 실제는 이보다 낮을 수 있음',
-    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: false }) },
+    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: !!o.sound }) },
   { id: 'seedance-2-fast', label: 'Seedance 2.0 Fast · 720p', model: 'bytedance/seedance-2-fast', usdSec: 24.8 * CR, durs: range(4, 15),
-    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: false }) },
+    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: !!o.sound }) },
   { id: 'seedance-2-mini', label: 'Seedance 2.0 Mini · 720p', model: 'bytedance/seedance-2-mini', usdSec: 8.2 * CR, durs: range(4, 15),
-    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: false }) },
+    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720p', aspect_ratio: ar(o.aspect, AR_V), duration: o.durationSec, generate_audio: !!o.sound }) },
   { id: 'grok-video-1-5', label: 'Grok Imagine Video 1.5 · 720p', model: 'grok-imagine-video-1-5-preview', usdSec: 4.5 * CR, durs: range(1, 15),
     in: (o) => ({ prompt: String(o.prompt).slice(0, 4096), image_urls: [o.imageUrl], aspect_ratio: ar(o.aspect, ['1:1', '16:9', '9:16', '3:2', '2:3']), resolution: '720p', duration: o.durationSec }) },
   { id: 'kling-3', label: 'Kling 3.0 · 720p', model: 'kling-3.0/video', usdSec: 14 * CR, durs: range(3, 15),
-    in: (o) => ({ prompt: o.prompt, image_urls: [o.imageUrl], sound: false, duration: String(o.durationSec), aspect_ratio: ar(o.aspect, ['16:9', '9:16', '1:1']), mode: 'std', multi_shots: false }) },
+    in: (o) => ({ prompt: o.prompt, image_urls: [o.imageUrl], sound: !!o.sound, duration: String(o.durationSec), aspect_ratio: ar(o.aspect, ['16:9', '9:16', '1:1']), mode: 'std', multi_shots: false }) },
   { id: 'kling-3-turbo', label: 'Kling 3.0 Turbo · 720p', model: 'kling/v3-turbo-image-to-video', usdSec: 18 * CR, durs: range(3, 15),
     in: (o) => ({ prompt: o.prompt, image_urls: [o.imageUrl], duration: String(o.durationSec), resolution: '720p' }) },
   { id: 'wan-3', label: 'Wan 3.0 · 720p', model: 'wan/3-0-video', usdSec: 16 * CR, durs: range(2, 30),
-    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720P', aspect_ratio: ar(o.aspect, ['16:9', '4:3', '1:1', '3:4', '9:16']), duration: o.durationSec, audio: false }) },
+    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720P', aspect_ratio: ar(o.aspect, ['16:9', '4:3', '1:1', '3:4', '9:16']), duration: o.durationSec, audio: !!o.sound }) },
   { id: 'wan-3-prime', label: 'Wan 3.0 Prime · 720p', model: 'wan/3-0-video-prime', usdSec: 25.2 * CR, durs: range(2, 30),
-    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720P', aspect_ratio: ar(o.aspect, ['16:9', '4:3', '1:1', '3:4', '9:16']), duration: o.durationSec, audio: false }) },
+    in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, resolution: '720P', aspect_ratio: ar(o.aspect, ['16:9', '4:3', '1:1', '3:4', '9:16']), duration: o.durationSec, audio: !!o.sound }) },
   { id: 'minimax-h3', label: 'MiniMax H3 · 768P', model: 'minimax-h3/image-to-video', usdSec: 8 * CR, usdPlus: 4 * CR, durs: range(4, 15),
     note: '그림 한 장마다 4크레딧($0.02) 추가 · 비율은 그림을 따른다',
     in: (o) => ({ prompt: String(o.prompt).slice(0, 7000), first_frame_url: o.imageUrl, duration: o.durationSec, resolution: '768P' }) },
@@ -77,10 +78,16 @@ const VIDEO = [
   { id: 'veo-3-1-fast', label: 'Veo 3.1 Fast · 720p', model: 'veo-3-1', usdByDur: { 4: 60 * CR, 6: 60 * CR, 8: 60 * CR }, durs: [4, 6, 8],
     in: (o) => ({ model: 'veo3_fast', prompt: o.prompt, image_urls: [o.imageUrl], generation_type: 'FIRST_AND_LAST_FRAMES_2_VIDEO', aspect_ratio: ar(o.aspect, ['16:9', '9:16']), resolution: '720p', duration: o.durationSec }) },
   { id: 'vidu-q4', label: 'Vidu Q4 · 720p', model: 'vidu-q4/image-to-video', usdSec: 15.2 * CR, durs: range(3, 16),
-    in: (o) => ({ prompt: o.prompt, image_url: o.imageUrl, duration: o.durationSec, resolution: '720p', audio: false }) },
+    in: (o) => ({ prompt: o.prompt, image_url: o.imageUrl, duration: o.durationSec, resolution: '720p', audio: !!o.sound }) },
   { id: 'gemini-omni-1-1', label: 'Gemini Omni 1.1 Flash · 720p', model: 'google/gemini-omni-flash-1-1', usdByDur: { 4: 63 * CR, 6: 84 * CR, 8: 105 * CR, 10: 126 * CR }, durs: [4, 6, 8, 10],
     in: (o) => ({ prompt: o.prompt, first_frame_url: o.imageUrl, duration: String(o.durationSec), aspect_ratio: ar(o.aspect, ['16:9', '9:16']), resolution: '720p' }) },
 ];
+
+// 🔊 영상 자체의 소리(그룹 영상 소리 선택 · v1.0.61) — 모델마다 다르다. 'flag' = 요청 인자로 켠다(기본은 끔 · o.sound) · 'always' = 끌 수 없다(늘 소리가 나온다) · 'unknown' = 코드에 인자가 없다(소리 여부 미확인).
+//   ※ 인자 이름은 docs.kie.ai 원문(Seedance generate_audio · Kling sound · Wan·Vidu audio)에서 — Veo 3.1·MiniMax H3 는 문서에 「끌 수 없음」.
+const SOUND_FLAG = new Set(['seedance-2-5', 'seedance-2-fast', 'seedance-2-mini', 'kling-3', 'wan-3', 'wan-3-prime', 'vidu-q4']);
+const SOUND_ALWAYS = new Set(['minimax-h3', 'veo-3-1-lite', 'veo-3-1-fast']);
+function soundOf(m) { const id = m && m.id; return SOUND_FLAG.has(id) ? 'flag' : SOUND_ALWAYS.has(id) ? 'always' : 'unknown'; }
 
 const isKieVal = (v) => String(v || '').indexOf(PREFIX) === 0;
 const idOf = (v) => (isKieVal(v) ? String(v).slice(PREFIX.length) : '');
@@ -115,4 +122,4 @@ function priceTag(m) {
 const buildImageInput = (m, o) => m.in({ ...o, prompt: String(o.prompt || '') });
 const buildVideoInput = (m, o) => m.in({ ...o, prompt: String(o.prompt || '') });
 
-module.exports = { PREFIX, MAX_SEC, IMAGE, VIDEO, isKieVal, idOf, valOf, byVal, pickDuration, videoUsd, priceTag, buildImageInput, buildVideoInput };
+module.exports = { PREFIX, MAX_SEC, IMAGE, VIDEO, soundOf, isKieVal, idOf, valOf, byVal, pickDuration, videoUsd, priceTag, buildImageInput, buildVideoInput };

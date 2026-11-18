@@ -55,21 +55,30 @@ function plan(srcSec, targetSec) {
   return { mode: 'loop', n, xfade: x };
 }
 
-/** 계획 → ffmpeg 인자(순수 — 테스트가 직접 본다) */
-function buildArgs(src, srcSec, targetSec, out, p) {
+/**
+ * 계획 → ffmpeg 인자(순수 — 테스트가 직접 본다)
+ *   keepAudio(🔊 그룹 영상 소리 선택 · v1.0.61) — 원본 영상의 소리를 지킨다: 느리게 = 같은 비율로 늘이고(atempo · 영상과 입 모양이 맞게),
+ *   반복 = 처음 한 번만 들려 주고 뒤는 무음(대사가 되풀이되지 않게). 안 주면 예전처럼 무음 오디오 트랙.
+ */
+function buildArgs(src, srcSec, targetSec, out, p, keepAudio) {
   const T = Number(targetSec).toFixed(3);
   const tail = ['-map', '[v]', '-map', 'a:0', '-t', T, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '64k', '-movflags', '+faststart', '-y', out];
   const silence = ['-f', 'lavfi', '-t', T, '-i', 'anullsrc=r=48000:cl=stereo'];
+  const A_FMT = 'aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo';
+  const aud = !keepAudio ? '' : ';' + (p.mode === 'slow'
+    ? `[0:a]atempo=${(1 / p.ratio).toFixed(5)},${A_FMT},apad[a]`
+    : `[0:a]atrim=0:${Number(srcSec).toFixed(3)},asetpts=N/SR/TB,${A_FMT},apad[a]`);
+  const mapA = (silIdx) => tail.map((a) => (a === 'a:0' ? (keepAudio ? '[a]' : `${silIdx}:a`) : a));
   if (p.mode === 'slow') {
     return ['-hide_banner', '-loglevel', 'error', '-i', src, ...silence,
-      '-filter_complex', `[0:v]setpts=${p.ratio.toFixed(5)}*PTS,fps=${FPS},format=yuv420p[v]`,
-      ...tail.map((a) => (a === 'a:0' ? '1:a' : a))];
+      '-filter_complex', `[0:v]setpts=${p.ratio.toFixed(5)}*PTS,fps=${FPS},format=yuv420p[v]${aud}`,
+      ...mapA(1)];
   }
   if (!p.xfade) {   // 반복이 너무 많으면 크로스페이드 없이
     return ['-hide_banner', '-loglevel', 'error', '-stream_loop', String(p.n), '-i', src, ...silence,
-      '-filter_complex', `[0:v]fps=${FPS},format=yuv420p[v]`,
-      ...tail.map((a) => (a === 'a:0' ? '1:a' : a))];
+      '-filter_complex', `[0:v]fps=${FPS},format=yuv420p[v]${aud}`,
+      ...mapA(1)];
   }
   const ins = [];
   for (let i = 0; i < p.n; i++) ins.push('-i', src);
@@ -84,27 +93,30 @@ function buildArgs(src, srcSec, targetSec, out, p) {
     prev = outL;
   }
   return ['-hide_banner', '-loglevel', 'error', ...ins, ...silence,
-    '-filter_complex', parts.join(';'),
-    ...tail.map((a) => (a === 'a:0' ? `${p.n}:a` : a))];
+    '-filter_complex', parts.join(';') + aud,
+    ...mapA(p.n)];
 }
 
 /**
  * 원본 영상을 targetSec 에 맞춘 파일 경로를 돌려준다(맞출 필요가 없거나 실패하면 원본 그대로).
  * @returns {Promise<{path:string, mode:'none'|'slow'|'loop'|'fail', cached?:boolean, error?:string}>}
  */
-async function fitVideo(src, srcSec, targetSec, { log = () => {}, dir = cacheDir(), label = '' } = {}) {
+async function fitVideo(src, srcSec, targetSec, { log = () => {}, dir = cacheDir(), label = '', keepAudio = false } = {}) {
   const p = plan(srcSec, targetSec);
   if (p.mode === 'none') return { path: src, mode: 'none' };
   let st;
   try { st = fs.statSync(src); } catch (_) { return { path: src, mode: 'fail', error: '원본 영상이 없습니다' }; }
-  const key = crypto.createHash('sha1').update([path.resolve(src), st.size, Math.round(st.mtimeMs), Number(targetSec).toFixed(2), p.mode, p.n || 0, SLOW_MAX, XFADE].join('|')).digest('hex').slice(0, 20);
+  // 🔊 원본에 소리가 있을 때만 지킨다(없는데 [0:a] 를 부르면 ffmpeg 가 실패한다)
+  let keep = false;
+  if (keepAudio) { try { keep = await require('./media-utils').hasAudioStream(src); } catch (_) { keep = false; } }
+  const key = crypto.createHash('sha1').update([path.resolve(src), st.size, Math.round(st.mtimeMs), Number(targetSec).toFixed(2), p.mode, p.n || 0, SLOW_MAX, XFADE].concat(keep ? ['keepAudio'] : []).join('|')).digest('hex').slice(0, 20);   // 열쇠: keepAudio 가 아니면 예전과 같다(캐시 그대로)
   const out = path.join(dir, `${key}.mp4`);
   const how = p.mode === 'slow' ? `느리게 ×${p.ratio.toFixed(2)}` : `반복 ${p.n}번${p.xfade ? ' · 이음새 크로스페이드' : ''}`;
   try { if (fs.statSync(out).size > 1000) { try { const n = new Date(); fs.utimesSync(out, n, n); } catch (_) {} log(`🎞 ${label}영상 ${Number(srcSec).toFixed(1)}초 → ${Number(targetSec).toFixed(1)}초 (${how} · 캐시)`); return { path: out, mode: p.mode, cached: true }; } } catch (_) {}
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
   const tmp = out.replace(/\.mp4$/, `.part-${process.pid}.mp4`);
   const t0 = Date.now();
-  const r = await _run(_ffmpeg(), buildArgs(src, srcSec, targetSec, tmp, p));
+  const r = await _run(_ffmpeg(), buildArgs(src, srcSec, targetSec, tmp, p, keep));
   if (!r.ok) {
     try { fs.rmSync(tmp, { force: true }); } catch (_) {}
     log(`⚠ ${label}영상 길이 맞추기 실패 — 원본을 그대로 씁니다(남는 시간은 마지막 장면에서 멈춥니다): ${r.error}`);

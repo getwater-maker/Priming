@@ -1060,7 +1060,8 @@ function mixArgs(tl) {
     if (x.loop !== false) args.push('-stream_loop', '-1');
     args.push('-i', x.file);
     const D = Math.max(0.1, (x.full ? T : x.t1 - x.t0));
-    const fi = x.full ? Math.min(2, D / 4) : Math.min(0.5, D / 4), fo = x.full ? Math.min(3, D / 4) : Math.min(1, D / 4);
+    //   🔊 영상 자체의 소리(그룹 영상 소리 선택 · ➕ 삽입 영상)는 짧게만 — 앞을 0.5초 키우면 대사 첫 마디가 먹힌다(v1.0.61)
+    const fi = x.full ? Math.min(2, D / 4) : x.video ? Math.min(0.04, D / 4) : Math.min(0.5, D / 4), fo = x.full ? Math.min(3, D / 4) : x.video ? Math.min(0.15, D / 4) : Math.min(1, D / 4);
     const vol = Math.max(0, Math.min(2, isFinite(+x.volume) ? +x.volume : 0.15));
     const ms = Math.round((x.full ? 0 : x.t0) * 1000);
     parts.push(`[${k + 1}:a]aresample=${A_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${vol.toFixed(3)},`

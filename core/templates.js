@@ -11,7 +11,7 @@ const VL = require('./visual-look');
 const CE = require('./clip-effects');
 
 const LOOK_KEYS = ['fill', 'flipH', 'flipV', 'motion', 'zoom', 'rot', 'bg', 'filter', 'opacity', 'crop', 'trans'];   // 템플릿이 담는 그림 효과
-const KEEP_KEYS = ['box', 'layer', 'kbSeg', 'fx'];                                                                 // 입혀도 그대로 두는 것
+const KEEP_KEYS = ['box', 'layer', 'kbSeg', 'fx', 'vsound'];                                                                 // 입혀도 그대로 두는 것
 
 /** 템플릿으로 저장할 그림 효과만 추려 정규화(기본값은 필드 없음) */
 function pickLook(look) {

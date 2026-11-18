@@ -4702,8 +4702,12 @@ async function runKieVideos(pr, mediaDir, onlyNums, engine) {
     const prompt = (g.videoPrompt && g.videoPrompt.trim()) || (g.motionNote && g.motionNote.trim()) || 'natural slow motion, subtle camera movement, cinematic';
     const out = P.claimPath(path.join(mediaDir, `${String(g.num).padStart(2, '0')}.mp4`), g.videoPath);   // 🔒
     g.videoStatus = 'generating'; pushDtoUpdate();
-    log(`  · G${g.num} → ${m.label} (${durationSec}초)…`);
-    const r = await KA.generateVideoToFile({ model: m, imagePath: g.imagePath, prompt, aspect: pr.aspect || '16:9', durationSec, outputPath: out, abortSignal: () => S.abort || !!stop, logger: log });
+    // 🔊 이 그룹이 「영상 소리」(look.vsound)를 골랐으면 소리를 켜고 만든다 — 안 골랐으면 예전처럼 끈다(요금·내레이션과 겹침 방지). 모델이 소리를 못 켜거나 알 수 없으면 알린다.
+    const _wantSound = !!require('./core/visual-look').effVsound(g, S.preset && S.preset.videoSound);   // 그룹 값 > 채널 기본값(채널 편집 ▸ 제작 도구 🔊)
+    const _sk = KM.soundOf(m);
+    if (_wantSound) log(`  🔊 G${g.num} 영상 소리 — ${_sk === 'flag' ? '소리를 켜고 만듭니다(요금이 더 들 수 있음)' : _sk === 'always' ? '이 모델은 늘 소리가 나옵니다' : '⚠ 이 모델은 소리 켜기를 확인하지 못했습니다(소리가 없으면 내레이션을 그대로 씁니다)'}`);
+    log(`  · G${g.num} → ${m.label} (${durationSec}초${_wantSound ? ' · 소리' : ''})…`);
+    const r = await KA.generateVideoToFile({ model: m, imagePath: g.imagePath, prompt, aspect: pr.aspect || '16:9', durationSec, outputPath: out, abortSignal: () => S.abort || !!stop, logger: log, sound: _wantSound });
     if (r.ok) { g.videoPath = r.path; g.videoStatus = 'done'; made++; log(`  ✓ G${g.num} 완료`); }
     else {
       g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
@@ -10062,6 +10066,63 @@ ipcMain.handle('edit-group-image', (_e, args = {}) => {
   }, 'comfy');
 });
 
+// ⬆ 그룹 하나 업스케일(v1.0.61 · 로이 2026-11-18 · ② 그룹 메뉴 「⬆ 업스케일」) — 영상이 있으면 영상(core/upscaler.upscaleVideo · 소리 그대로),
+//   없으면 그림(upscaleImage · Real-ESRGAN 2배). 새 파일(영상 `NN_1080.mp4` · 그림 `NN_up.png`)로 쓰고 경로만 바꾼다 — ⛔ 원본을 지우지 않는다(Ctrl+Z = 원본으로).
+//   이미 목표 해상도(캔버스) 이상이면 하지 않고 알린다 · 레인 'upscale'(자동 업스케일과 겹치지 않게).
+ipcMain.handle('upscale-group', (_e, args = {}) => {
+  const { shortsNum, groupNum } = args;
+  if (!S.parsed) throw new Error('대본을 먼저 여세요.');
+  const pr0 = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  if (!pr0) throw new Error('대본을 찾지 못했습니다.');
+  const outRoot0 = S.outRoot;
+  return _runOnLanes(['upscale'], `G${groupNum} 업스케일`, () => withAwake('업스케일', async () => {
+    const pr = pr0, g = pr.groups.find((x) => x.num === groupNum);
+    if (!g) return P.toDTO(S.parsed);
+    const MU = require('./core/media-utils'), Up = require('./core/upscaler');
+    const [W, H] = (pr.aspect === '1:1') ? [1080, 1080] : (pr.aspect === '9:16') ? [1080, 1920] : [1920, 1080];
+    const mediaDir = shortsDirs(outRoot0, shortsNum).media;
+    resetWorkAbort();
+    const t0 = Date.now();
+    if (g.videoPath && fs.existsSync(g.videoPath)) {
+      const info = await MU.getMediaInfo(g.videoPath).catch(() => null);
+      if (!info || !info.width) throw new Error('영상 해상도를 읽지 못했습니다.');
+      if (info.width >= W && info.height >= H) { log(`⬆ G${groupNum} 영상은 이미 ${info.width}x${info.height} — 업스케일할 필요가 없습니다(목표 ${W}x${H})`); return P.toDTO(S.parsed); }
+      const want = g.videoPath.replace(/(_1080)?\.mp4$/i, '') + '_1080.mp4';
+      const out = P.claimPath(want, null, ['.mp4']);
+      const UP = require('./core/upscale-config').load();
+      const method = UP.mode === 'fast' ? 'fast' : 'ai';
+      log(`⬆ ${prLabel(pr)} G${groupNum} 영상 업스케일 ${info.width}x${info.height} → ${W}x${H} (${method === 'fast' ? '빠름·ffmpeg' : 'AI·Real-ESRGAN'})…`);
+      const prev = g.videoStatus; g.videoStatus = 'upscaling'; pushDtoUpdate();
+      let r = null;
+      try { r = await Up.upscaleVideo(g.videoPath, out, { width: W, height: H, method, logger: log, abortSignal: () => S.abort }); }
+      finally { g.videoStatus = prev || 'done'; }
+      if (!r || !r.ok) { try { fs.rmSync(out, { force: true }); } catch {} pushDtoUpdate(); throw new Error(r && r.aborted ? '업스케일을 멈췄습니다' : '영상 업스케일 실패'); }
+      const wasUser = _userAttached(g, 'video');
+      undoPush('업스케일');
+      g.videoPath = out; if (wasUser) g._userVideo = _visKey(out);
+      log(`✓ G${groupNum} 영상 업스케일 → ${path.basename(out)} (${((Date.now() - t0) / 1000).toFixed(1)}초 · 원본은 그대로 — Ctrl+Z 로 되돌릴 수 있습니다)`);
+    } else if (g.imagePath && fs.existsSync(g.imagePath)) {
+      const dim = require('./vrew/vrew-builder').readImageSize(g.imagePath);
+      if (!dim || !dim.w || !dim.h) throw new Error('그림 크기를 읽지 못했습니다.');
+      if (dim.w >= W && dim.h >= H) { log(`⬆ G${groupNum} 그림은 이미 ${dim.w}x${dim.h} — 업스케일할 필요가 없습니다(목표 ${W}x${H})`); return P.toDTO(S.parsed); }
+      const out = P.claimPath(path.join(mediaDir, String(g.num).padStart(2, '0') + '_up.png'), null, P.IMG_EXTS);
+      log(`⬆ ${prLabel(pr)} G${groupNum} 그림 업스케일 ${dim.w}x${dim.h} → 2배(Real-ESRGAN)…`);
+      const prev = g.imageStatus; g.imageStatus = 'generating'; pushDtoUpdate();
+      let r = null;
+      try { r = await Up.upscaleImage(g.imagePath, out, { scale: 2, logger: log, abortSignal: () => S.abort }); }
+      finally { g.imageStatus = prev || 'done'; }
+      if (!r || !r.ok) { pushDtoUpdate(); throw new Error('그림 업스케일 실패: ' + ((r && r.error) || '알 수 없는 오류')); }
+      const wasUser = _userAttached(g, 'image');
+      undoPush('업스케일');
+      g.imagePath = out; g.imageCleared = false; g.imageStale = false; if (wasUser) g._userImage = _visKey(out);
+      const d2 = require('./vrew/vrew-builder').readImageSize(out);
+      log(`✓ G${groupNum} 그림 업스케일 → ${path.basename(out)}${d2 ? ` ${d2.w}x${d2.h}` : ''} (${((Date.now() - t0) / 1000).toFixed(1)}초 · 원본은 그대로 — Ctrl+Z 로 되돌릴 수 있습니다)`);
+    } else throw new Error('이 그룹에는 업스케일할 그림·영상이 없습니다.');
+    storeActive(); pushDtoUpdate();
+    return P.toDTO(S.parsed);
+  }));
+});
+
 // ── 이미지 프롬프트 내보내기/가져오기/API (prompt-io) ──────────────
 const PromptIO = require('./core/prompt-io');
 
@@ -10837,10 +10898,25 @@ ipcMain.handle('set-group-look', (_e, args = {}) => {
   const merged = { ...(g.look || {}), ...(args.patch || {}) };
   if (args.patch && args.patch.box === null) delete merged.box;   // 📐 「자리 원래대로」
   const next = VL.normLook(merged);
+  const _vsChan = S.preset && S.preset.videoSound;
+  const _vsPrev = VL.effVsound(g, _vsChan);
   undoPush('그림 모양');
   g.look = VL.isDefault(next) ? undefined : next;
   storeActive(); pushDtoUpdate();
   log('🖼 ' + prLabel(pr) + ' G' + g.num + ' 그림 — ' + VL.describe(next));
+  // 🔊 영상 소리 선택을 새로 골랐으면 그 그룹 영상에 소리가 있는지 바로 알려 준다(없으면 내레이션을 끄지 않는다 — 소리를 켠 채 영상을 다시 만들어야 한다)
+  const _vsNow = VL.effVsound({ look: next }, _vsChan);
+  if (_vsNow && (!_vsPrev || _vsPrev.mode !== _vsNow.mode)) {
+    const _gn = g.num, _vp = g.videoPath;
+    (async () => {
+      try {
+        if (!_vp || !fs.existsSync(_vp)) { log(`🔊 G${_gn} 영상 소리 선택 — 이 그룹은 아직 영상이 없습니다(영상을 만들 때 소리를 켭니다)`); return; }
+        const has = await require('./core/media-utils').hasAudioStream(_vp);
+        log(has ? `🔊 G${_gn} 영상에 소리가 있습니다 — 만들 때 ${_vsNow.mode === 'video' ? '내레이션을 무음으로 하고 영상 소리만' : '내레이션과 영상 소리를 함께'} 냅니다(${VL.vsoundLabel(_vsNow)})`
+          : `⚠ 🔊 G${_gn} 영상에는 소리가 없습니다 — 지금은 내레이션(TTS)을 그대로 씁니다. 소리를 켠 채 영상을 다시 만들어야 합니다(영상 삭제 → 영상 만들기)`);
+      } catch (_) {}
+    })();
+  }
   return P.toDTO(S.parsed);
 });
 // 🏷 이 대본의 로고 자리(채널 로고가 켜져 있을 때) — right(기본) | left. 켜기·파일·크기는 채널 설정.

@@ -646,6 +646,8 @@ export default function App() {
 
   // 헤더 컨트롤
   const [presetName, setPresetName] = useState('');
+  // 🔊 지금 채널의 기본 영상 소리(채널 편집 ▸ 제작 도구) — ② 그룹 메뉴 「볼륨」의 「채널 기본값」
+  const chanVsound = useMemo(() => VLook.normChanVsound(((presets || []).find((p) => p.name === presetName) || {}).videoSound), [presets, presetName]);
   const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
@@ -1878,6 +1880,13 @@ export default function App() {
     try { const d = await api.editGroupImage({ shortsNum, groupNum, instruction: String(ins).trim() }); setDto(d); setStatus('✏ 그림 고침 — 마음에 안 들면 Ctrl+Z'); }
     catch (e) { logline('오류: ' + e.message); setStatus('그림 고치기 실패'); }
   }
+  // ⬆ 그룹 하나 업스케일(② 그룹 메뉴 · v1.0.61) — 영상이 있으면 영상, 없으면 그림 · 원본은 남는다(Ctrl+Z)
+  async function runUpscale(shortsNum, groupNum) {
+    followNow();
+    setStatus(`G${groupNum} 업스케일 중…`);
+    try { const d = await api.upscaleGroup({ shortsNum, groupNum }); if (d) setDto(d); setStatus(`⬆ G${groupNum} 업스케일 — 결과는 로그에서 · 마음에 안 들면 Ctrl+Z`); }
+    catch (e) { logline('업스케일 오류: ' + e.message); setStatus('업스케일 실패'); }
+  }
   async function runRegen(shortsNum, groupNum) {
     followNow();
     const sid = await runStyleId(); if (sid === undefined) { setStatus('스타일을 고르지 않아 취소했습니다'); return; }
@@ -2046,7 +2055,7 @@ export default function App() {
   }, [_mlKey]);
   // 🖼 그림 모양(채우기·반전·움직임) · 🏷 AI 고지 범위
   async function setGroupLook(shortsNum, groupNum, patch) {
-    try { const d = await api.setGroupLook({ shortsNum, groupNum, patch }); if (d) setDto(d); setStatus(`🖼 G${groupNum} 그림 모양을 바꿨습니다 (Ctrl+Z 되돌리기)`); }
+    try { const d = await api.setGroupLook({ shortsNum, groupNum, patch }); if (d) setDto(d); setStatus(patch && 'vsound' in patch ? `🔊 G${groupNum} 소리 설정을 바꿨습니다 (Ctrl+Z 되돌리기)` : `🖼 G${groupNum} 그림 모양을 바꿨습니다 (Ctrl+Z 되돌리기)`); }
     catch (e) { logline('그림 모양 오류: ' + e.message); }
   }
   async function setAiRange(shortsNum, from, to, ask) {
@@ -3870,6 +3879,7 @@ export default function App() {
       imgEngine: normImgEngine(p.imgEngine), videoEngine: normVideoEngine(p.videoEngine || 'none'), // 이미지·비디오 제작 도구 기본값(채널 단위)
       outTarget: normOutTargetUi(p.outTarget), // ✏ 완성물 종류(채널 기본값)
       vidSel: normVidSel(p.vidSel),            // 🎬 영상 대상 방식(채널 기본값) — ⚠ 아래 저장 patch 에도 실을 것
+      videoSound: VLook.normChanVsound(p.videoSound),   // 🔊 영상 소리(채널 기본값 · v1.0.61) — ⚠ 아래 저장 patch 에도 실을 것
       outLong: p.outLong || p.outputFolder || '',
       // ✏ 화이트보드 완성물이 떨어질 폴더 — 비어 있으면 main 이 윈도우 다운로드 폴더를 채워 보낸다.
       outWhiteboard: p.outWhiteboard || '',
@@ -4371,6 +4381,7 @@ export default function App() {
       imgEngine: normImgEngine(ch.imgEngine), videoEngine: normVideoEngine(ch.videoEngine || 'none'), // 이미지·비디오 제작 도구(채널 기본값)
       outTarget: normOutTargetUi(ch.outTarget), // ⚠ patch 에 안 실으면 저장할 때 빈 값으로 덮인다(v0.3.8 계열)
       vidSel: normVidSel(ch.vidSel),            // 🎬 영상 대상 방식 — ⚠ 마찬가지
+      videoSound: VLook.normChanVsound(ch.videoSound),   // 🔊 영상 소리 — ⚠ 마찬가지(안 실으면 저장 때 지워진다)
       outLong: (ch.outLong || '').trim(),
       outWhiteboard: (ch.outWhiteboard || '').trim(),    // ✏ 화이트보드 MP4·자막이 떨어질 폴더
       outUpload: (ch.outUpload || '').trim(),            // 🎬 유튜브 업로드용 MP4 가 떨어질 폴더 — ⚠ patch 에 안 실으면 저장 때 빈 값으로 덮인다
@@ -6135,6 +6146,7 @@ export default function App() {
             {tb('◐', '불투명도 — 그림을 반투명으로', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === 'opac' && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: 'opac', subY: r.top, num: stageSel.num, cap: '', only: true })); }, { tid: 'vtb-opac', on: !!(lk && lk.opacity != null && lk.opacity < 100) })}
             {tb('⌗', '자르기 — 사각(위·아래·왼쪽·오른쪽)', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === 'crop' && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: 'crop', subY: r.top, num: stageSel.num, cap: '', only: true })); }, { tid: 'vtb-crop', on: !!(lk && lk.crop) })}
             {tb('⇋', '좌우 반전', () => setGroupLook(sn, grpNum, { flipH: !(lk && lk.flipH) }), { tid: 'vtb-flip', on: !!(lk && lk.flipH) })}
+            {lay && lay.videoPath && tb('🔊', '소리 — 이 영상 그룹에서 내레이션(TTS)과 영상 소리 중 무엇을 낼지', (e) => { const r = e.currentTarget.getBoundingClientRect(); setStageCtx((c) => (c && c.sub === 'vsnd' && c.only ? null : { x: Math.max(4, r.left - 196), y: r.top, sub: 'vsnd', subY: r.top, num: stageSel.num, cap: '', only: true })); }, { tid: 'vtb-vsnd', on: !!(lk && lk.vsound) })}
             {tb('⟳', '그림 교체 — 파일을 골라 바꾸기', () => attachAsset(sn, grpNum), { tid: 'vtb-replace' })}
           </div>
         );
@@ -7484,7 +7496,7 @@ export default function App() {
             <Row icon="⛶" label="채우기" sub="fill" dis={!grp && !ovR} tid="sx-fill" />
             <Row icon="☰" label="순서" sub="ord" tid="sx-ord" />
           </div>}
-          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 220)) : subTop, width: SW }} onMouseDown={(e) => { if (stageCtx.sub !== 'opac' && stageCtx.sub !== 'crop') e.preventDefault(); }}>
+          {stageCtx.sub && <div className="vr-menu clip-ctx clip-ctx-sub" data-testid={'sx-sub-' + stageCtx.sub} style={{ left: stageCtx.only ? left : subLeft, top: stageCtx.only ? Math.max(4, Math.min(stageCtx.y, window.innerHeight - 220)) : subTop, width: SW }} onMouseDown={(e) => { if (stageCtx.sub !== 'opac' && stageCtx.sub !== 'crop' && stageCtx.sub !== 'vsnd') e.preventDefault(); }}>
             {stageCtx.sub === 'fill' && fillSub}
             {stageCtx.sub === 'vid' && <>
               <Row icon="🎬" label={'AI 비디오 G' + num} tid="sx-vid-ai" onClick={run(() => runGroupVid(pr.shortsNum, num))} />
@@ -7508,6 +7520,8 @@ export default function App() {
               <Row icon={ovR.flipH ? '✓' : ''} label="좌우 반전" tid="sx-flip-h" onClick={run(() => ovLook({ flipH: !ovR.flipH }))} />
               <Row icon={ovR.flipV ? '✓' : ''} label="상하 반전" tid="sx-flip-v" onClick={run(() => ovLook({ flipV: !ovR.flipV }))} />
             </>}
+            {/* 🔊 그룹 영상 소리 선택(v1.0.61) — 이 영상 그룹에서 내보낼 소리: 내레이션(TTS)만(기본) · 영상 소리만(내레이션 무음) · 섞기 → 그룹 look.vsound(core/visual-look) */}
+            {stageCtx.sub === 'vsnd' && grp && lay && !ovR && <VsndMenu key={'vs' + num} c={lay} chan={chanVsound} tp="sx-vsnd" onSet={(v) => setGroupLook(pr.shortsNum, num, { vsound: v })} />}
             {tgtR && stageCtx.sub === 'opac' && <>
               {sldRow('불투명도', 0, 100, tgtR.opacity != null ? tgtR.opacity : 100, 'sx-opac', (v) => tgtLook({ opacity: v }))}
               <Row icon="" label="100% 로 되돌리기" tid="sx-opac-reset" onClick={run(() => tgtLook({ opacity: 100 }))} />
@@ -7938,7 +7952,7 @@ export default function App() {
             cursor={cursor} onCursor={(sn, n) => userCursor({ shortsNum: sn, n })}
             capBase={capBase} capSel={capSelV} onPickCapLine={pickCapLine} onPickCapChars={pickCapChars}
             onTts={runTts} onImg={runImg} onVid={runVid} onImgVid={runImgVid} onTtsImg={runTtsImg} onTtsImgVid={runTtsImgVid} onBulk={runBulk}
-            onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg}
+            onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg} onUpscale={runUpscale} chanVsound={chanVsound}
             onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
             onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} onWordPlay={isLf ? playFromWord : null} onWordDelete={isLf ? deleteWords : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
@@ -8317,6 +8331,30 @@ export default function App() {
                   </select>
                   {vidIsList(ch.vidSel) && <input data-testid="ch-vid-list" type="text" style={{ width: 200 }} placeholder="1,2,5,7" value={vidListText(ch.vidSel)} onChange={(e) => setCh({ ...ch, vidSel: normVidSel(VID_LIST + e.target.value) })} />}
                   <Hint>비디오는 그룹마다 비용·시간이 든다 — 쉼표로 적은 번호의 그룹만 만든다(적은 번호 그대로 · 1번 자동 추가 없음). 이 채널을 고르면 헤더의 영상 방식이 이 값으로 시작하고, 큐의 대본마다 바꿀 수 있다.</Hint></div>
+                {/* 🔊 영상 소리(v1.0.61 · 로이 2026-11-18) — 만든 영상의 소리를 쓸지 · 그룹 메뉴 「🔊 볼륨」이 그룹마다 이긴다(core/visual-look effVsound) */}
+                {(() => {
+                  const vs = VLook.normChanVsound(ch.videoSound);
+                  const mode = vs ? vs.mode : 'tts';
+                  const setVs = (patch) => setCh({ ...ch, videoSound: VLook.normChanVsound({ ...(vs || {}), mode, ...patch }) });
+                  const pct = (key, label, val) => (
+                    <div className="col"><div className="crow stack"><span className="l">{label}</span>
+                      <span><input type="number" data-testid={'ch-vsnd-' + key} min={0} max={200} step={5} style={{ width: 64 }} value={val} onChange={(e) => setVs({ [key]: e.target.value })} /> %</span></div></div>
+                  );
+                  return (
+                    <div className="crow stack"><span className="l">🔊 영상 소리 (이 채널 기본값)</span>
+                      <div className="eqgrid" style={{ '--n': 3 }}>
+                        <div className="col"><div className="crow stack"><span className="l">소리</span>
+                          <select data-testid="ch-vsnd" value={mode} onChange={(e) => setCh({ ...ch, videoSound: e.target.value === 'tts' ? null : VLook.normChanVsound({ mode: e.target.value }) })}>
+                            <option value="tts">내레이션(TTS)만 — 영상 소리 끔</option>
+                            <option value="video">영상 소리만 — 내레이션 무음</option>
+                            <option value="mix">내레이션 + 영상 소리</option>
+                          </select></div></div>
+                        {vs ? pct('vol', '🎬 영상 소리', vs.vol) : <div className="col" />}
+                        {vs && vs.mode === 'mix' ? pct('nar', '🎤 내레이션', vs.nar) : <div className="col" />}
+                      </div>
+                      <Hint>영상이 있는 그룹에서 내레이션과 영상 자체의 소리(음악·효과음·대사)를 어떻게 낼지 정합니다. 영상 소리를 고르면 소리를 켤 수 있는 AI 영상은 만들 때 소리를 켭니다(요금이 더 들 수 있음). 영상에 소리가 없으면 내레이션을 그대로 씁니다. 그룹마다 ② 그룹 메뉴 「🔊 볼륨」에서 따로 바꿀 수 있습니다.</Hint></div>
+                  );
+                })()}
                 {/* 💬 화이트보드 자막 — 굽는 자막의 모양. 켜고 끄는 스위치는 헤더 ④ 완성의 「💬 자막」이다. */}
                 <div className="subhead">💬 화이트보드 자막 (구워 넣는 글자)</div>
                 {/* 다섯 칸을 한 줄에(v0.6.82 — 탭 높이를 다른 탭과 맞춘다). 값·저장 키는 그대로 wbSub.{sizePct,marginPct,pos,font,bold} */}
@@ -9380,7 +9418,7 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, on
       </div>
     </div>);
 }
-function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause, onWordPlay, onWordDelete }) {
+function Cards({ onEditImg, onUpscale, chanVsound, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause, onWordPlay, onWordDelete }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
@@ -9925,8 +9963,8 @@ function Cards({ onEditImg, dto, isLf, capCharsN, layout, detail, linesMap, curs
         );
       })}
       {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu((cur) => (cur ? { ...cur, sub: v } : cur))}
-        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onEditImg={onEditImg} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay}
-        grp={vrewLay ? { onPlayGroup, onPlayFrom, onGroupTts, onShowPrompt, onMerge, onSplit, playing } : null} />}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onEditImg={onEditImg} onUpscale={onUpscale} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay} chanVsound={chanVsound}
+        grp={vrewLay ?{ onPlayGroup, onPlayFrom, onGroupTts, onShowPrompt, onMerge, onSplit, playing } : null} />}
       {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
   );
@@ -10323,8 +10361,33 @@ function ovAsLayer(o) {
     imageVersion: o.version, videoVersion: o.version, ovKind: o.kind, ovRaw: o,
     look: { motion: o.kind === 'image' && o.motion ? o.motion : 'none', ...(o.flipH ? { flipH: true } : {}), ...(o.flipV ? { flipV: true } : {}), ...(box ? { box } : { fill: 'contain' }), ...(cr ? { crop: cr } : {}), ...(op < 100 ? { opacity: op } : {}) } };
 }
+// 🔊 그룹 영상 소리(볼륨) 고르기 — ② 그룹 메뉴 「🔊 볼륨」 · ① 칸 막대 🔊 가 같이 쓴다(v1.0.61 · 판정은 core/visual-look effVsound 한 곳)
+//   채널 기본값 따르기(그룹 값 없음) · 내레이션만(명시) · 영상 소리만 · 내레이션 + 영상 소리(두 음량) — 메뉴는 닫지 않고 표시를 바로 바꾼다
+function VsndMenu({ c, chan, onSet, tp }) {
+  const [own, setOwn] = useState(() => VLook.normVsound(c && c.look && c.look.vsound));
+  const eff = VLook.effVsound({ look: { vsound: own } }, chan);
+  const set = (v) => { const n = VLook.normVsound(v); setOwn(n); onSet(n); };
+  const chk = (on) => <span className="vr-chk">{on ? '✓' : ''}</span>;
+  const sld = (label, key, val) => (
+    <div className="cx-sld" key={key + ':' + (own ? own.mode : 'chan')} style={{ padding: '4px 10px' }}><span>{label}</span>
+      <input type="range" min={0} max={200} step={5} defaultValue={val} data-testid={`${tp}-${key}`}
+        onInput={(e) => { e.currentTarget.nextSibling.textContent = e.currentTarget.value + '%'; }}
+        onPointerUp={(e) => set({ ...eff, [key]: +e.currentTarget.value })} onKeyUp={(e) => set({ ...eff, [key]: +e.currentTarget.value })} /><b>{val}%</b></div>
+  );
+  return (<>
+    <button data-testid={tp + '-chan'} title="채널 편집 ▸ 제작 도구 「🔊 영상 소리」 값을 따른다" onClick={() => set(null)}>{chk(!own)}채널 기본값 따르기 <span className="vr-val">{VLook.vsoundLabel(chan)}</span></button>
+    <button data-testid={tp + '-tts'} onClick={() => set({ mode: 'tts' })}>{chk(own && own.mode === 'tts')}내레이션(TTS)만</button>
+    <button data-testid={tp + '-video'} onClick={() => set({ mode: 'video', vol: eff && eff.vol })}>{chk(own && own.mode === 'video')}영상 소리만 (내레이션 무음)</button>
+    <button data-testid={tp + '-mix'} onClick={() => set({ mode: 'mix', vol: eff && eff.mode === 'mix' ? eff.vol : undefined, nar: eff && eff.nar })}>{chk(own && own.mode === 'mix')}내레이션 + 영상 소리</button>
+    {eff && <div className="vr-sep" />}
+    {eff && sld('🎬 영상 소리', 'vol', eff.vol)}
+    {eff && eff.mode === 'mix' && sld('🎤 내레이션', 'nar', eff.nar)}
+    <div className="meta" data-testid={tp + '-note'} style={{ padding: '4px 10px', maxWidth: 240, whiteSpace: 'normal' }}>영상에 소리가 있어야 합니다. 소리를 켤 수 있는 AI 영상은 만들 때 소리를 켭니다(요금이 더 들 수 있음). 이미 만든 영상에 소리가 없으면 내레이션을 그대로 씁니다.</div>
+  </>);
+}
+
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
-function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp }) {
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onUpscale, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp, chanVsound }) {
   const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
   const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
@@ -10355,7 +10418,15 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEdi
   const has = !!(c.imagePath || c.videoPath);
   const lk = VLook.normLook(c.look);
   const look = (patch) => go(() => onLook(sn, c.num, patch));
-  const back = <button className="vr-back" onClick={() => setSub(null)}>‹ {({ range: '적용 범위 변경', fill: '채우기', flip: '반전', motion: '움직임(애니메이션)' })[m.sub]}</button>;
+  const back = <button className="vr-back" onClick={() => setSub(null)}>‹ {({ range: '적용 범위 변경', fill: '채우기', flip: '반전', motion: '움직임(애니메이션)', vsnd: '볼륨 (영상 소리)' })[m.sub]}</button>;
+  if (m.sub === 'vsnd') {
+    return (
+      <div className="vr-menu" style={style} data-testid="vr-menu">
+        {back}
+        <VsndMenu c={c} chan={chanVsound} tp="mn-vsnd" onSet={(v) => onLook(sn, c.num, { vsound: v })} />
+      </div>
+    );
+  }
   if (m.sub === 'range') {
     return (
       <div className="vr-menu" style={style} data-testid="vr-menu">
@@ -10421,12 +10492,14 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEdi
         <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
         {lk.box && <button onClick={look({ box: null })}>📐 자리·크기 원래대로</button>}
         {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}{lk.kbSeg ? ` · ${lk.kbSeg === 'auto' ? '자동 구간' : lk.kbSeg === 'off' ? '한 번에' : lk.kbSeg + '구간'}` : ''}{lk.fx ? ` · 오버레이 ${lk.fx === 'off' ? '끔' : lk.fx}` : ''}</span> ›</button>}
+        <button data-testid="mn-vsnd" title="이 그룹에서 내레이션(TTS)과 영상 자체의 소리를 어떻게 낼지 — 영상 소리를 쓰면 내레이션을 줄이거나 끈다" onClick={() => setSub('vsnd')}>🔊 볼륨 <span className="vr-val">{VLook.vsoundLabel(VLook.effVsound(c, chanVsound))}{!lk.vsound ? ' (채널)' : ''}</span> ›</button>
         <div className="vr-sep" />
       </>}
       <button onClick={go(() => onAttach(sn, c.num))}>🔁 {has ? '교체' : '첨부'} (파일)</button>
       <button onClick={go(() => onRegen(sn, c.num))}>🖼 AI로 이미지 생성</button>
       {c.imagePath && onEditImg && <button data-testid="mn-edit-img" title="지금 그림을 지시문대로 고칩니다(Qwen-Image 2.1 Turbo · 로컬 · 약 20초) — 원본은 지우지 않으니 Ctrl+Z 로 되돌릴 수 있습니다" onClick={go(() => onEditImg(sn, c.num))}>✏ 그림 고치기 (Qwen)</button>}
       <button onClick={go(() => onGroupVid(sn, c.num))}>🎬 AI로 비디오 생성</button>
+      {has && onUpscale && <button data-testid="mn-upscale" title={c.videoPath ? '이 그룹 영상을 화면 크기(1080p)로 키웁니다(Real-ESRGAN · 소리 그대로) — 원본은 지우지 않으니 Ctrl+Z 로 되돌릴 수 있습니다' : '이 그룹 그림을 2배로 키웁니다(Real-ESRGAN) — 원본은 지우지 않으니 Ctrl+Z 로 되돌릴 수 있습니다'} onClick={go(() => onUpscale(sn, c.num))}>⬆ 업스케일 <span className="vr-val">{c.videoPath ? '영상' : '그림'}</span></button>}
       <div className="vr-sep" />
       <button onClick={() => setSub('range')}>↕ 적용 범위 변경 ›</button>
       {has && <><div className="vr-sep" /><button className="vr-del" onClick={go(() => onClear(sn, c.num))}>🗑 삭제</button></>}

@@ -144,13 +144,13 @@ async function generateImageToFile({ model, prompt, aspect, outPathNoExt, abortS
 }
 
 /** 그림 → 영상 파일 { ok, path } | { ok:false, error, fatal? } */
-async function generateVideoToFile({ model, imagePath, prompt, aspect, durationSec, outputPath, abortSignal, logger }) {
+async function generateVideoToFile({ model, imagePath, prompt, aspect, durationSec, outputPath, abortSignal, logger, sound = false }) {
   const KM = require('./kie-models');
   const key = kieKey(); if (!key) return { ok: false, error: '생성 서비스 키 없음', fatal: '생성 서비스 키 없음' };
   try {
     const up = await uploadFile(imagePath, key);
     if (!up.ok) return up;
-    const input = KM.buildVideoInput(model, { prompt, aspect, durationSec, imageUrl: up.url });
+    const input = KM.buildVideoInput(model, { prompt, aspect, durationSec, imageUrl: up.url, sound: !!sound });   // 🔊 sound = 그룹이 영상 소리를 골랐을 때만(소리 인자가 있는 모델)
     const c = await createTask(model.model, input, key);
     if (!c.ok) return c;
     const w = await waitTask(c.taskId, { key, abortSignal, timeoutMs: 20 * 60 * 1000, everyMs: 6000 });
