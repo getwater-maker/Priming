@@ -32,13 +32,15 @@ const ok = (c, m) => { n++; if (!c) { bad++; console.log('  ✗ ' + m); } else c
 const SCRIPT = [
   '# 테스트 대본 (자동 생성 — 지워도 됩니다)',
   '',
-  '## 첫째 마당',
+  '## 도입',   // ⏱ 「도입」은 ## 이하 머리줄에서만 도입부로 잡힌다(v1.0.64 — 제목 줄 「│ 도입부 mm:ss」 확인용)
   '',
   '### 도입부',
   '> 🖼️ 이미지: an old man sitting quietly by a window at dawn, wide empty space',
   '',
   '어떤 사람은 말을 아낀다. 그 침묵이 오히려 힘이 된다.',
   '',
+  '',
+  '## 첫째 마당',
   '',
   '### 본론 하나',
   '> 🖼️ 이미지: two people talking across a low wooden table, soft daylight',
@@ -131,6 +133,14 @@ fs.writeFileSync(SCRIPT_PATH, SCRIPT, 'utf8');
     // 🗂 끝나면 저절로 닫힌다(v0.6.46 · 3초) — 판정력: 닫히지 않으면 8초 대기가 시간 초과로 실패한다.
     const closed = await win.waitForSelector('[data-testid="make-progress"]', { state: 'detached', timeout: 8000 }).then(() => true, () => false);
     ok(closed, '🗂 완료된 진행 팝업은 저절로 닫힌다');
+    // ⏱ 제목 줄 「│ 도입부 mm:ss」(v1.0.64 · 로이) — 합계(·RTF) 다음 · 값 = 도입부 그룹 음성 합(합계와 같은 기준)
+    {
+      await win.waitForTimeout(600);
+      const want = await win.evaluate(async () => { const q = await window.api.listQueue(); const s0 = q.dto.projects[0].cuts.reduce((a, c) => a + (c.isIntro ? (c.groupDurationSec || 0) : 0), 0); return s0 > 0 ? '│ 도입부 ' + String(Math.floor(Math.round(s0) / 60)).padStart(2, '0') + ':' + String(Math.round(s0) % 60).padStart(2, '0') : ''; });
+      const got = await win.evaluate(() => { const e = document.querySelector('[data-testid=intro-len]'); return e ? e.innerText.trim() : ''; });
+      const line = await win.evaluate(() => { const t = document.querySelector('.card h2 .total'); return t ? t.innerText.replace(/\s+/g, ' ').trim() : ''; });
+      ok(!!want && got === want && /^합계 .*│ 도입부 \d\d:\d\d$/.test(line), '⏱ 제목 줄 끝에 도입부 길이(도입부 그룹 음성 합) ' + JSON.stringify({ want, got, line }));
+    }
 
     // ④ 로그창에 실패 흔적이 없어야 한다 (핸들러가 삼킨 예외도 잡는다)
     const logText = await win.evaluate(() => (document.querySelector('#log') || {}).textContent || '');

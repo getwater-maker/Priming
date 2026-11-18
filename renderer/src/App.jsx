@@ -9623,6 +9623,7 @@ function Cards({ onEditImg, onUpscale, chanVsound, onVtrim, clipAdd, dto, isLf, 
     <div id="cards">
       {dto.projects.map((pr) => {
         const total = pr.cuts.reduce((s, c) => s + (c.groupDurationSec || 0), 0);
+        const introSec = pr.cuts.reduce((s, c) => s + (c.isIntro ? (c.groupDurationSec || 0) : 0), 0);   // ⏱ 도입부 길이(합계와 같은 기준 = 그룹 음성 길이 합)
         const totalGen = pr.cuts.reduce((s, c) => s + (c.groupGenSec || 0), 0);
         const rtf = (total > 0 && totalGen > 0) ? (totalGen / total) : null;
         let capN = 0;
@@ -9660,7 +9661,7 @@ function Cards({ onEditImg, onUpscale, chanVsound, onVtrim, clipAdd, dto, isLf, 
               ? (dto.fileTitle || pr.title)
               : <>{dto.fileTitle ? `${dto.fileTitle} | ` : ''}{pr.title}</>} <span className="meta">({pr.aspect} · {pr.cuts.length}컷)</span>
               {pr.cardBad && <span className="card-bad" data-testid="card-bad" title={pr.cardBad.join('\n') + '\n→ 이 카드들은 🎬 유튜브 MP4 에서 건너뜁니다(대본의 카드 줄을 고치세요)'}>⚠ 📜 카드 {pr.cardBad.length}줄 문장 못 찾음</span>}
-              {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}</span>}
+              {total > 0 && <span className="total">합계 {fmtMinSec(total)}{rtf != null && <span className="rtf" title="RTF = TTS 생성시간 ÷ 음성길이 (낮을수록 빠름)">│ RTF {rtf.toFixed(2)}</span>}{introSec > 0 && <span className="rtf" data-testid="intro-len" title="도입부(노란 그룹) 음성 길이 합 — 합계와 같은 기준">│ 도입부 {String(Math.floor(Math.round(introSec) / 60)).padStart(2, '0')}:{String(Math.round(introSec) % 60).padStart(2, '0')}</span>}</span>}
               <span className="cardbtns">
                 {/* 🎛 대본 머리 버튼(v0.9.39 · 로이) — 이 대본에만 · 순서 TTS → 일괄첨부 → 이미지 → 비디오 → 묶음(글자 없는 아이콘) · ▶ 미리보기·⚡ 만들기·🎞 프리미어는 뺐다 */}
                 <button className="ghost" onClick={() => onTts(pr.shortsNum)}>🎤 TTS</button>
