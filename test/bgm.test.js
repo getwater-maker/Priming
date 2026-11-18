@@ -24,18 +24,20 @@ const dir = path.join(tmp, 'music'); fs.mkdirSync(dir);
 ['a.mp3', 'b.mp3', 'c.wav'].forEach((n) => fs.copyFileSync(tone('_' + n.replace(/\.\w+$/, '') + '.wav', 0.3), path.join(dir, n)));
 fs.writeFileSync(path.join(dir, 'memo.txt'), 'x');
 const one = path.join(dir, 'a.mp3');
-ok(pickBgmFile(one, 'x') === one, '파일이면 그 파일');
-const k1 = pickBgmFile(dir, '[고전_0901] 제목.md');
+const pf = (p, k, ai) => { const r = pickBgmFile(p, k, ai); return r ? r.file : null; };   // v1.0.65 — {file, how, why} 를 돌려준다
+ok(pf(one, 'x') === one, '파일이면 그 파일');
+const k1 = pf(dir, '[고전_0901] 제목.md');
 ok(k1 && /\.(mp3|wav)$/.test(k1), '폴더면 음악 파일 하나(메모 파일은 무시)');
-ok(pickBgmFile(dir, '[고전_0901] 제목.md') === k1, '🔑 같은 대본은 다시 만들어도 같은 곡');
-const picks = new Set(['1.md', '2.md', '3.md', '4.md', '5.md', '6.md', '7.md', '8.md'].map((k) => pickBgmFile(dir, k)));
+ok(pf(dir, '[고전_0901] 제목.md') === k1, '🔑 같은 대본은 다시 만들어도 같은 곡');
+const picks = new Set(['1.md', '2.md', '3.md', '4.md', '5.md', '6.md', '7.md', '8.md'].map((k) => pf(dir, k)));
 ok(picks.size >= 2, `대본이 다르면 곡이 돌아간다 (${picks.size}곡)`);
-ok(pickBgmFile(path.join(tmp, 'none'), 'x') === null && pickBgmFile(path.join(dir, 'memo.txt'), 'x') === null, '없는 경로·음악 아닌 파일은 null');
+ok(pf(path.join(tmp, 'none'), 'x') === null && pf(path.join(dir, 'memo.txt'), 'x') === null, '없는 경로·음악 아닌 파일은 null');
 const logs = [];
 ok(resolveBgm({ bgmOn: false, bgmPath: one }, 'a.md').bgm.enabled === false, '꺼 두면 없음');
 const rb = resolveBgm({ bgmOn: true, bgmPath: one, bgmVolume: 30 }, 'a.md', (l) => logs.push(l));
 ok(rb.bgm.enabled && rb.bgm.audioPath === one && rb.bgm.volume === 0.3 && rb.bgm.loop === true, '켜면 곡·음량(30% → 0.3)·반복');
-ok(logs.some((l) => /🎵 배경음악: a\.mp3 · 음량 30%/.test(l)), '어느 곡인지 로그');
+ok(logs.some((l) => /🎵 배경음악: a\.mp3 · 음량 30% · 전체/.test(l)), '어느 곡인지 로그');
+ok(!('scope' in rb.bgm), '🔑 「전체」면 scope 를 싣지 않는다(빌드 지문이 예전과 같다)');
 ok(resolveBgm({ bgmOn: true, bgmPath: one, bgmVolume: 500 }, 'a.md').bgm.volume === 1, '음량은 100% 까지');
 const l2 = [];
 ok(resolveBgm({ bgmOn: true, bgmPath: path.join(tmp, 'gone') }, 'a.md', (l) => l2.push(l)).bgm.enabled === false && l2.some((l) => /찾지 못했습니다/.test(l)), '🔑 곡이 없어도 막지 않는다 — 알리고 BGM 없이');
@@ -50,7 +52,8 @@ ok(/afade=t=in/.test(a) && /afade=t=out:st=57\.000/.test(a), '앞뒤 페이드(�
 ok(!/-stream_loop/.test(R.bgmMixArgs({ file: 'm.mp3', loop: false }, 60).join(' ')), '반복 끄면 stream_loop 없음');
 
 console.log('\n[3] 배선');
-ok((MAIN.match(/resolveBgm\((ep|preset), S\.scriptPath, log\)/g) || []).length === 2, 'export-vrew · ⚡ 만들기 두 경로 모두');
+ok((MAIN.match(/resolveBgm\((ep|preset), scriptPath, log\)/g) || []).length === 2, 'export-vrew · ⚡ 만들기 두 경로 모두');
+ok((MAIN.match(/await ensureBgmAiPick\(preset, scriptPath, /g) || []).length === 2, '🤖 두 경로 모두 resolveBgm 앞에서 AI 선곡을 준비한다');
 ok(/if \(preset\.bgm && preset\.bgm\.enabled && preset\.bgm\.audioPath\) opts\.bgm = preset\.bgm/.test(read('core/pipeline.js')), 'pipeline → 빌더');
 const APP = read('renderer/src/App.jsx');
 ok(/bgmOn: !!p\.bgmOn, bgmPath: p\.bgmPath/.test(APP) && /bgmOn: !!ch\.bgmOn, bgmPath: \(ch\.bgmPath/.test(APP), '채널편집 싣기·저장');

@@ -1169,7 +1169,7 @@ export default function App() {
     let cancelled = false;
     api.getPresetDetail(presetName).then((p) => {
       if (cancelled || !p) return;
-      setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
+      setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15, ai: !!p.bgmAi, scope: p.bgmScope === 'intro' ? 'intro' : 'all' });   // 🎵 채널 배경음악(➕ 삽입 메뉴)
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: OL.chanLogoPos(p) });   // 🏷 채널 로고(➕ 삽입 메뉴 · ① 칸 미리보기)
       setAiCfg(p.aiNotice && typeof p.aiNotice === 'object' ? p.aiNotice : {});   // 🏷 AI 고지 문구·시각(① 칸 미리보기 · v0.6.88)
       setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼
@@ -1209,7 +1209,7 @@ export default function App() {
     if (!presetName || !presetRev) return;
     api.getPresetDetail(presetName).then((p) => {
       if (!p) return;
-      setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15 });
+      setBgmCfg({ on: !!p.bgmOn, path: p.bgmPath || '', volume: p.bgmVolume != null ? Number(p.bgmVolume) : 15, ai: !!p.bgmAi, scope: p.bgmScope === 'intro' ? 'intro' : 'all' });
       setLogoCfg({ on: !!p.logoOn, path: p.logoPath || '', size: Math.max(4, Math.min(40, Number(p.logoSize) || 12)), pos: OL.chanLogoPos(p) });
       setCardPause(Number(p.interludePauseSec) > 0 ? Number(p.interludePauseSec) : 0);   // ⏸ 막간 쉼(채널편집에서 바꾼 값)
     }).catch(() => {});
@@ -2678,16 +2678,33 @@ export default function App() {
   }
   const [insMenu, setInsMenu] = useState(null);   // { sn, id, x, y } — 적용 범위 메뉴
   // 🎵 채널 배경음악 — 영상 전체(채널의 모든 영상). 구간만 넣을 땐 🎵 오디오 삽입
-  const [bgmCfg, setBgmCfg] = useState({ on: false, path: '', volume: 15 });
+  const [bgmCfg, setBgmCfg] = useState({ on: false, path: '', volume: 15, ai: false, scope: 'all' });
+  const [bgmMenu, setBgmMenu] = useState(null);   // 🎵 배경음악 더 보기 팝업 {x, y}(리본 1366px 한 줄을 지키려고 칸을 접었다)
+  const bgmIsDir = !!bgmCfg.path && !/\.(mp3|wav|m4a|aac|flac|ogg)$/i.test(String(bgmCfg.path));   // 폴더를 골랐나(🤖 AI 선곡은 폴더일 때만)
   async function saveBgm(patch) {
     const next = { ...bgmCfg, ...patch };
     setBgmCfg(next);
     if (!presetName) return;
     try {
       const vol = Math.max(0, Math.min(100, Number(next.volume) || 0));
-      await api.savePreset({ name: presetName, patch: { bgmOn: !!next.on, bgmPath: next.path || '', bgmVolume: vol } });
-      setStatus(next.on && next.path ? `🎵 채널 「${presetName}」 배경음악 — ${String(next.path).split(/[\\/]/).pop()} · 음량 ${vol}% (이 채널의 모든 영상)` : `🎵 채널 「${presetName}」 배경음악 끔`);
+      await api.savePreset({ name: presetName, patch: { bgmOn: !!next.on, bgmPath: next.path || '', bgmVolume: vol, bgmAi: !!next.ai, bgmScope: next.scope === 'intro' ? 'intro' : 'all' } });
+      try { audUrlRef.current.delete('__bgm:' + presetName); } catch (_) {}   // ▶ 미리 듣기 곡을 다시 고르게
+      setStatus(next.on && next.path ? `🎵 채널 「${presetName}」 배경음악 — ${String(next.path).split(/[\\/]/).pop()}${next.ai ? ' · 🤖 AI 선곡' : ''} · ${next.scope === 'intro' ? '도입부만' : '전체'} · 음량 ${vol}% (이 채널의 모든 영상)` : `🎵 채널 「${presetName}」 배경음악 끔`);
     } catch (e) { logline('배경음악 저장 오류: ' + e.message); }
+  }
+  // 🤖 지금 대본의 곡을 AI 가 다시 고른다(채널 폴더 · 결과는 대본 이름으로 기억 — 다음 만들기도 같은 곡)
+  async function bgmAiRepick() {
+    setStatus('🎵🤖 배경음악 고르는 중…');
+    try {
+      const r = await api.bgmAiPick({ presetName });
+      if (r && r.ok) { try { audUrlRef.current.delete('__bgm:' + presetName); } catch (_) {} setStatus(`🎵🤖 이 대본 배경음악 → ${r.name}${r.why ? ` — ${r.why}` : ''}`); }
+      else setStatus('🎵 ' + ((r && r.error) || 'AI 선곡 실패'));
+    } catch (e) { logline('배경음악 AI 선곡 오류: ' + e.message); }
+  }
+  async function bgmPixabay() {
+    setStatus('🔎 Pixabay 검색어 정하는 중…');
+    try { const r = await api.bgmPixabaySearch({ presetName }); setStatus(r && r.keywords && r.keywords.length ? `🔎 Pixabay 음악 「${r.keywords.join(' ')}」 — 받은 곡은 배경음악 폴더에 넣으세요` : '🔎 Pixabay 음악 페이지를 열었습니다 — 받은 곡은 배경음악 폴더에 넣으세요'); }
+    catch (e) { logline('Pixabay 찾기 오류: ' + e.message); }
   }
   async function pickBgm(dir) {
     const f = dir ? await api.pickDir() : await api.pickFile({ filters: [{ name: '음악', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg'] }] });
@@ -6604,9 +6621,9 @@ export default function App() {
                 <span className="hdiv" />
                 <span className="ins-logo" data-testid="ins-bgm" title={`🎵 채널 배경음악 — 채널 「${presetName || ''}」의 모든 영상 전체에 낮게 깝니다(폴더면 대본마다 한 곡). 구간만 넣으려면 🎵 오디오`}>
                   <label className="chk"><input type="checkbox" data-testid="bgm-on" checked={!!bgmCfg.on} disabled={!presetName} onChange={(e) => (e.target.checked && !bgmCfg.path ? pickBgm(false) : saveBgm({ on: e.target.checked }))} />🎵 배경음악</label>
-                  <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일…'}</button>
+                  <button className="ghost" data-testid="bgm-file" disabled={!presetName} title={bgmCfg.path || '음악 파일 고르기'} onClick={() => pickBgm(false)}>{bgmCfg.path ? String(bgmCfg.path).split(/[\\/]/).pop() : '파일'}</button>
                   <button className="ghost" data-testid="bgm-dir" disabled={!presetName} title="폴더 — 대본마다 그 안의 한 곡" onClick={() => pickBgm(true)}>폴더</button>
-                  <span className="meta">음량</span>
+                  <button className="ghost" data-testid="bgm-more" style={{ padding: "0 3px", minWidth: 0 }} disabled={!presetName} title={`🎵 배경음악 더 보기 — 깔 곳(지금 ${bgmCfg.scope === 'intro' ? '도입부만' : '전체'}) · 🤖 AI 선곡(${bgmCfg.ai && bgmIsDir ? '켬' : '끔'}) · 🔎 Pixabay 무료 음악 찾기`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setBgmMenu({ x: r.left, y: r.bottom + 4 }); }}>{bgmCfg.ai && bgmIsDir ? '🤖' : ''}{bgmCfg.scope === 'intro' ? '도입' : ''}▾</button>
                   <input className="nbox" data-testid="bgm-vol" type="number" style={{ width: 44 }} min="0" max="100" step="5" disabled={!bgmCfg.on} value={bgmCfg.volume} title="배경음악 음량 % (기본 15)" onChange={(e) => saveBgm({ volume: e.target.value })} /><span className="meta">%</span>
                 </span>
                 <span className="hdiv" />
@@ -7722,6 +7739,15 @@ export default function App() {
             </div>
             <div className="zr-btns"><button className="ghost" data-testid="lib-refresh" onClick={() => { setLibPanel((p) => (p ? { ...p, busy: true } : p)); libLoad(libPanel.lib, libPanel.q, true); }}>폴더 다시 읽기</button><button data-testid="lib-close" onClick={() => { try { if (libAudioRef.current) libAudioRef.current.pause(); } catch (_) {} setLibPanel(null); }}>닫기</button></div>
           </div>}
+          {bgmMenu && createPortal(<div className="vr-menu-bg" onMouseDown={() => setBgmMenu(null)} />, document.body)}
+          {bgmMenu && createPortal(<div className="vr-menu zr-panel" data-testid="bgm-menu" style={{ position: 'fixed', left: bgmMenu.x, top: bgmMenu.y, zIndex: 9000 }} onMouseDown={(e) => e.stopPropagation()}>
+            <b>🎵 채널 배경음악</b>
+            <label>깔 곳 <select data-testid="bgm-scope" value={bgmCfg.scope || 'all'} title="전체 = 영상 처음부터 끝까지 · 도입부 = 도입부 문장 동안만(도입부가 없는 대본엔 넣지 않음)" onChange={(e) => saveBgm({ scope: e.target.value })}>
+              <option value="all">전체</option><option value="intro">도입부만</option></select></label>
+            <label className="chk" title={bgmIsDir ? '대본 분위기와 곡 이름(옆 「곡이름.txt」 설명도)을 보고 편마다 폴더에서 한 곡을 고릅니다(Claude · 고른 곡은 대본마다 기억) · 끄면 대본 이름으로 한 곡' : 'AI 선곡은 「폴더」를 골랐을 때만 됩니다'}><input type="checkbox" data-testid="bgm-ai" checked={!!bgmCfg.ai} disabled={!bgmIsDir} onChange={(e) => saveBgm({ ai: e.target.checked })} />🤖 AI 선곡{bgmIsDir ? '' : ' (폴더일 때만)'}</label>
+            {bgmCfg.ai && bgmIsDir && <button className="ghost" data-testid="bgm-ai-pick" disabled={!loaded || !isLf} title="이 대본의 배경음악을 AI 가 다시 고릅니다(기억을 덮어씀)" onClick={() => { setBgmMenu(null); bgmAiRepick(); }}>🔄 이 대본 곡 다시 고르기</button>}
+            <button className="ghost" data-testid="bgm-pixabay" title="AI 가 대본 분위기로 검색어를 정해 Pixabay 무료 음악 페이지를 엽니다. 받은 곡은 배경음악 폴더에 넣으세요(Pixabay 는 자동 받기를 지원하지 않습니다)" onClick={() => { setBgmMenu(null); bgmPixabay(); }}>🔎 Pixabay 에서 음악 찾기</button>
+          </div>, document.body)}
           {pwMenu && createPortal(<div className="vr-menu-bg" onMouseDown={() => setPwMenu(null)} />, document.body)}
           {pwMenu && createPortal(<div className="vr-menu pw-menu" data-testid="pw-menu" style={{ position: 'fixed', left: pwMenu.x, top: pwMenu.y, zIndex: 9000 }} onMouseDown={(e) => e.stopPropagation()}>
             <button data-testid="pw-clip" onClick={() => pwPick('clip')}>빈 클립</button>

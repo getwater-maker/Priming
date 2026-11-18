@@ -698,8 +698,14 @@ function validateOutput(pj, sentenceCount, imageGroupCount) {
 //     - props.assets[aid] = { trackIds:[tid], role:'sub' }
 //     - ⚠ 그 aid 를 **모든 clip 의 assetIds** 에 추가 (트랙만 있고 asset 링크가 없으면 Vrew 가 BGM 을 안 튼다 — v0.1.73 사고)
 //   bgm = { audioPath, volume(0..1), loop }
-async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
+//   📍 bgm.scope === 'intro'(v1.0.65) = 도입부 문장 clip(introClipIds)에만 링크한다 — Vrew 는 링크된 clip 동안만 튼다(➕ 오디오 삽입과 같은 방식)
+//     도입부가 없는 대본이면 트랙을 넣지 않는다(전체로 바꾸지 않는다 — 채널이 「도입부만」을 골랐다)
+async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log, introClipIds = null) {
   if (!bgm || !bgm.audioPath || !fs.existsSync(bgm.audioPath)) return null;
+  const _intro = bgm.scope === 'intro';
+  const _allClips = (pj.transcript && pj.transcript.clips) || [];
+  const _linkClips = _intro ? _allClips.filter((c) => introClipIds && introClipIds.has(c.id)) : _allClips;
+  if (_intro && !_linkClips.length) { log('[Vrew] 🎵 배경음악 「도입부만」 — 이 대본에 도입부가 없어 배경음악을 넣지 않습니다'); return null; }
   let fileDur = totalDurationSec, sr = 44100, chn = 2;
   try {
     const info = await require('../core/media-utils').getMediaInfo(bgm.audioPath);
@@ -729,10 +735,9 @@ async function addBgmTrack(pj, bgm, totalDurationSec, mediaZip, log) {
     type: 'bgm',
   };
   pj.props.assets[aid] = { trackIds: [tid], role: 'sub' };
-  const clips = (pj.transcript && pj.transcript.clips) || [];
-  for (const c of clips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; c.assetIds.push(aid); }
-  log(`[Vrew] BGM 트랙 추가(type:bgm · 전 clip(${clips.length}) 링크): vol=${vol} loop=${bgm.loop !== false} 곡 ${fileDur.toFixed(0)}s · 영상 ${(+totalDurationSec || 0).toFixed(0)}s`);
-  return { mid, tid, aid };
+  for (const c of _linkClips) { if (!Array.isArray(c.assetIds)) c.assetIds = []; c.assetIds.push(aid); }
+  log(`[Vrew] BGM 트랙 추가(type:bgm · ${_intro ? `도입부 clip(${_linkClips.length}/${_allClips.length})` : `전 clip(${_linkClips.length})`} 링크): vol=${vol} loop=${bgm.loop !== false} 곡 ${fileDur.toFixed(0)}s · 영상 ${(+totalDurationSec || 0).toFixed(0)}s`);
+  return { mid, tid, aid, intro: _intro };
 }
 
 async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
@@ -896,6 +901,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   const groupImageAsset = new Map();
   const groupTopY = new Map();   // 그룹별 미디어 상단 y (레터박스면 영상/이미지 위쪽 검정띠 끝). 0=꽉참
   const groupClips = new Map();  // 그룹별 clip id 목록 (제목/도형을 그룹 클립에만 링크)
+  const _introClipIds = new Set();   // 🎵 도입부 문장의 clip id
   let groupIdx = 0;
   const missingImg = [];
   // 🖼 그림 범위(core/visual-span) — 그룹 그림이 자기 문장 밖으로 **아래층으로 이어질 때** 그 문장들 동안 계속 보인다.
@@ -1412,6 +1418,7 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       const _clipId = sid();
       if (!groupClips.has(s.groupId)) groupClips.set(s.groupId, []);
       groupClips.get(s.groupId).push(_clipId);
+      if (s.isIntro) _introClipIds.add(_clipId);   // 🎵 도입부 배경음악(채널 bgmScope 'intro')이 링크할 clip
       pj.transcript.clips.push({
         sceneId: unifiedSceneId,
         id: _clipId,
@@ -1488,10 +1495,12 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   }
 
   // ---------- 2.55. 배경음(BGM) 트랙 — 전체 길이, 나레이션 아래 낮은 볼륨 ----------
+  let _bgmIntroTid = null;   // 📍 도입부만 깐 배경음 트랙 — MP4 렌더러가 페이드를 채널 배경음처럼(길게) 주도록 옆 파일로 알린다
   if (opts.bgm && opts.bgm.enabled && opts.bgm.audioPath) {
     try {
       const _bgmTotal = clipDurations.reduce((a, d) => a + (d || 0), 0);
-      await addBgmTrack(pj, opts.bgm, _bgmTotal, mediaZip, log);
+      const _bg = await addBgmTrack(pj, opts.bgm, _bgmTotal, mediaZip, log, _introClipIds);
+      if (_bg && _bg.intro) _bgmIntroTid = _bg.tid;
     } catch (e) {
       log(`[Vrew] BGM 트랙 추가 실패: ${e.message}`);
     }
@@ -1569,7 +1578,10 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
   // 🎬 화면 전환 옆 파일 — 있으면 쓰고 없으면 옛 것을 지운다(MP4 렌더러만 읽는다 · Vrew 는 모른다)
   try {
     const _fxp = vrewPath + '.fx.json';
-    if (Object.keys(_transByTrack).length) { fs.writeFileSync(_fxp, JSON.stringify({ v: 1, trans: _transByTrack }), 'utf8'); log(`[Vrew] 🎬 화면 전환 ${Object.keys(_transByTrack).length}곳 — MP4 에만 들어갑니다(.vrew 에는 담기지 않음)`); }
+    const _fxo = { v: 1 };
+    if (Object.keys(_transByTrack).length) { _fxo.trans = _transByTrack; log(`[Vrew] 🎬 화면 전환 ${Object.keys(_transByTrack).length}곳 — MP4 에만 들어갑니다(.vrew 에는 담기지 않음)`); }
+    if (_bgmIntroTid) _fxo.bgmIntro = _bgmIntroTid;   // 🎵 도입부 배경음 트랙 id(MP4 페이드)
+    if (Object.keys(_fxo).length > 1) fs.writeFileSync(_fxp, JSON.stringify(_fxo), 'utf8');
     else if (fs.existsSync(_fxp)) fs.rmSync(_fxp, { force: true });
   } catch (_) {}
 

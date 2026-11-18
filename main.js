@@ -90,16 +90,39 @@ function resolveAiNotice(preset, want) {
 // 🎵 배경음악 — 채널 설정(bgmOn · bgmPath = 파일 또는 폴더 · bgmVolume %)으로 이 편의 곡을 고른다(2026-09-24).
 //   폴더면 **대본 이름으로 정해지는 한 곡**(같은 대본은 다시 만들어도 같은 곡 · 편마다 곡이 돌아간다).
 //   ⚠ 파일이 없으면 막지 않는다 — 로그로 알리고 BGM 없이 만든다(음악 때문에 영상이 안 나오면 본말전도).
-const BGM_EXT = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
-function pickBgmFile(p, key) {
+//   🤖 채널 `bgmAi`(폴더일 때) = Claude 가 대본 분위기로 고른 곡(core/bgm-pick 이 기억) · 없으면 위 해시 규칙(v1.0.65)
+//   📍 채널 `bgmScope` 'intro' = 도입부 클립에만 깐다(빌더가 도입부 clip 에만 링크 · MP4 는 그 구간만)
+const BGM_EXT = require('./core/bgm-pick').BGM_EXT;
+function pickBgmFile(p, key, ai = false) {
   try {
     if (!p || !fs.existsSync(p)) return null;
-    if (fs.statSync(p).isFile()) return BGM_EXT.test(p) ? p : null;
-    const list = fs.readdirSync(p).filter((f) => BGM_EXT.test(f)).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
-    if (!list.length) return null;
-    let h = 0; for (const ch of String(key || '')) h = (h * 31 + ch.codePointAt(0)) >>> 0;
-    return path.join(p, list[h % list.length]);
+    if (fs.statSync(p).isFile()) return BGM_EXT.test(p) ? { file: p, how: 'file' } : null;
+    const c = require('./core/bgm-pick').choose({ dir: p, scriptName: key, ai });
+    return c ? { file: c.track.file, how: c.how, why: c.why } : null;
   } catch { return null; }
+}
+// 🎵🤖 이 편의 AI 선곡을 준비한다(빌드 전에 한 번 · 비동기) — 채널이 AI 를 켰고 폴더이며 기억된 곡이 없을 때만 Claude 에 묻는다.
+//   실패·키 없음·무인 제작 = 조용히 해시 규칙(음악 때문에 영상을 막지 않는다). force = 기억을 무시하고 다시 고른다(리본 🤖 단추).
+async function ensureBgmAiPick(preset, scriptPath, project, logger, { force = false } = {}) {
+  try {
+    if (!preset || !preset.bgmOn || !preset.bgmAi || !preset.bgmPath) return null;
+    if (!fs.existsSync(preset.bgmPath) || !fs.statSync(preset.bgmPath).isDirectory()) return null;
+    const BP = require('./core/bgm-pick');
+    const scriptName = path.basename(scriptPath || '');
+    const tracks = BP.listTracks(preset.bgmPath);
+    if (!tracks.length) return null;
+    if (!force) { const s = BP.storedChoice(preset.bgmPath, scriptName, tracks); if (s) return { name: s.track.name, why: s.why, how: 'stored' }; }
+    if (tracks.length === 1) { BP.saveChoice(preset.bgmPath, scriptName, { name: tracks[0].name, why: '폴더에 곡이 하나뿐입니다' }); return { name: tracks[0].name, why: '', how: 'only' }; }
+    const CA = require('./core/claude-api');
+    if (!CA.available()) { if (logger) logger('🎵 배경음악 AI 선곡 — Claude 키가 없어(또는 무인 제작) 예전 방식(대본 이름)으로 고릅니다'); return null; }
+    const brief = BP.scriptBrief({ name: scriptName, sentences: (project && project.sentences) || [], scope: BP.normScope(preset.bgmScope) });
+    const r = await CA.ask({ use: 'bgm', text: BP.buildPickPrompt(brief, tracks), maxTokens: 400, timeoutMs: 90000, log: logger, label: '배경음악 선곡' });
+    const pk = r && r.ok ? BP.parsePick(r.text, tracks, CA.parseJson) : null;
+    if (!pk) { if (logger) logger(`⚠ 배경음악 AI 선곡 실패 — ${(r && r.error) || '후보에 없는 곡을 답했습니다'} · 예전 방식(대본 이름)으로 고릅니다`); return null; }
+    BP.saveChoice(preset.bgmPath, scriptName, { name: pk.track.name, why: pk.why });
+    if (logger) logger(`🎵🤖 배경음악 AI 선곡: ${pk.track.name}${pk.why ? ` — ${pk.why}` : ''}`);
+    return { name: pk.track.name, why: pk.why, how: 'ai' };
+  } catch (e) { if (logger) logger(`⚠ 배경음악 AI 선곡 오류 — ${e.message}`); return null; }
 }
 // 🏷 채널 로고(채널편집 📁 폴더) — 켠 채널만 · 파일이 없으면 알리고 끈다
 function withLogo(preset, logger) {
@@ -113,11 +136,13 @@ function resolveBgm(preset, scriptPath, logger) { return withLogo(_resolveBgm(pr
 function _resolveBgm(preset, scriptPath, logger) {
   if (!preset) return preset;
   if (!preset.bgmOn || !preset.bgmPath) return { ...preset, bgm: { enabled: false } };
-  const f = pickBgmFile(preset.bgmPath, path.basename(scriptPath || ''));
+  const pk = pickBgmFile(preset.bgmPath, path.basename(scriptPath || ''), !!preset.bgmAi);
   const vol = Math.max(0, Math.min(100, isFinite(+preset.bgmVolume) ? +preset.bgmVolume : 15)) / 100;
-  if (!f) { if (logger) logger(`⚠ 배경음악을 찾지 못했습니다 — ${preset.bgmPath} (음악 파일 mp3·wav·m4a·flac·ogg). 배경음악 없이 만듭니다`); return { ...preset, bgm: { enabled: false } }; }
-  if (logger) logger(`🎵 배경음악: ${path.basename(f)} · 음량 ${Math.round(vol * 100)}% · 반복`);
-  return { ...preset, bgm: { enabled: true, audioPath: f, volume: vol, loop: true } };
+  if (!pk) { if (logger) logger(`⚠ 배경음악을 찾지 못했습니다 — ${preset.bgmPath} (음악 파일 mp3·wav·m4a·flac·ogg). 배경음악 없이 만듭니다`); return { ...preset, bgm: { enabled: false } }; }
+  const intro = require('./core/bgm-pick').normScope(preset.bgmScope) === 'intro';
+  if (logger) logger(`🎵 배경음악: ${path.basename(pk.file)}${pk.how === 'ai' ? ' (🤖 AI 선곡)' : ''} · 음량 ${Math.round(vol * 100)}% · ${intro ? '도입부만' : '전체'} · 반복`);
+  //   📍 scope 는 도입부일 때만 싣는다(전체 = 예전과 같은 객체 → 빌드 지문이 그대로)
+  return { ...preset, bgm: { enabled: true, audioPath: pk.file, volume: vol, loop: true, ...(intro ? { scope: 'intro' } : {}) } };
 }
 
 // 로컬 이미지/영상 미리보기용 커스텀 프로토콜 (app ready 전에 등록 필요).
@@ -3970,6 +3995,7 @@ ipcMain.handle('export-vrew', async (_e, args = {}) => {
   }
   preset = resolveAiNotice(preset, aiNotice); // 사용자 선택(작업바 체크박스)
   if (preset) preset = { ...preset, ytAuto: args.uploadAfter === 'on' };   // 업로드 여부는 헤더 체크박스만(채널 값 무시)
+  await ensureBgmAiPick(preset, scriptPath, ((parsed && parsed.projects) || [])[0], log);   // 🎵🤖 AI 선곡(⚡ 만들기 4단계와 같게)
   preset = resolveBgm(preset, scriptPath, log);   // 🎵 채널 배경음악
   await capMarksEnsure(parsed);   // ✂🤖 자막 끊어 읽기(⚡ 만들기 4단계와 같게)
   const outs = [];
@@ -8342,6 +8368,7 @@ async function runMakeAllBody(opts = {}) {
         continue;
       }
       if (S.abort) break;
+      await ensureBgmAiPick(preset, scriptPath, pr, log);   // 🎵🤖 AI 선곡(채널이 켠 때만 · 이미 고른 곡이 있으면 묻지 않는다)
       if (wbGo) {
         // 게이트(위 두 개)는 .vrew 와 같은 것을 이미 통과했다. 확인 팝업은 없다(누르면 바로 만든다).
         const wr = await runWhiteboardFor(pr, outRoot, { preset, captionMaxChars, ctx: runCtx });
@@ -14036,6 +14063,32 @@ ipcMain.handle('bgm-preview-file', (_e, args = {}) => {
     const r = _resolveBgm(p || {}, S.scriptPath, null);
     return r && r.bgm && r.bgm.enabled ? { file: r.bgm.audioPath, volume: r.bgm.volume } : null;
   } catch { return null; }
+});
+// 🎵🤖 지금 대본의 배경음악을 AI 가 다시 고른다(➕ 삽입 리본 🤖 · v1.0.65) — 채널이 폴더 + AI 를 켰을 때만. 기억을 덮어쓴다.
+ipcMain.handle('bgm-ai-pick', async (_e, args = {}) => {
+  const p = args.presetName ? P.getPreset(args.presetName) : S.preset;
+  if (!p || !p.bgmOn || !p.bgmPath) return { ok: false, error: '배경음악이 꺼져 있습니다' };
+  try { if (!fs.statSync(p.bgmPath).isDirectory()) return { ok: false, error: 'AI 선곡은 「폴더」를 골랐을 때만 됩니다' }; } catch (_) { return { ok: false, error: '배경음악 폴더를 찾지 못했습니다' }; }
+  if (!S.scriptPath) return { ok: false, error: '먼저 대본을 여세요' };
+  if (!require('./core/claude-api').available()) return { ok: false, error: 'Claude API 키가 없습니다 — ⚙ 설정 → 🔑 API 키' };
+  const r = await ensureBgmAiPick({ ...p, bgmAi: true }, S.scriptPath, ((S.parsed && S.parsed.projects) || [])[0], log, { force: true });
+  return r ? { ok: true, name: r.name, why: r.why } : { ok: false, error: 'AI 가 곡을 고르지 못했습니다 — 로그를 보세요' };
+});
+// 🔎 Pixabay 음악 찾기 — Claude 가 대본 분위기로 영어 검색어를 정하고 Pixabay 음악 검색 페이지를 연다(받기는 사람 · Pixabay 는 음악 API 가 없다)
+ipcMain.handle('bgm-pixabay-search', async (_e, args = {}) => {
+  const BP = require('./core/bgm-pick'); const CA = require('./core/claude-api');
+  const p = (args.presetName ? P.getPreset(args.presetName) : S.preset) || {};
+  let kw = null;
+  if (S.scriptPath && CA.available()) {
+    const brief = BP.scriptBrief({ name: path.basename(S.scriptPath), sentences: (((S.parsed && S.parsed.projects) || [])[0] || {}).sentences || [], scope: BP.normScope(p.bgmScope) });
+    const r = await CA.ask({ use: 'bgm', text: BP.buildSearchPrompt(brief), maxTokens: 300, timeoutMs: 60000, log, label: 'Pixabay 검색어' });
+    kw = r && r.ok ? BP.parseKeywords(r.text, CA.parseJson) : null;
+    if (!kw) log(`⚠ Pixabay 검색어를 정하지 못했습니다 — ${(r && r.error) || '답을 읽지 못했습니다'} · 음악 첫 화면을 엽니다`);
+  }
+  const url = BP.pixabayUrl(kw && kw.keywords);
+  log(`🔎 Pixabay 음악 찾기: ${kw ? kw.keywords.join(' ') : '(검색어 없음)'}${kw && kw.why ? ` — ${kw.why}` : ''} · 받은 곡은 배경음악 폴더에 넣으세요`);
+  await openLink(url);
+  return { ok: true, url, keywords: kw ? kw.keywords : [], why: kw ? kw.why : '' };
 });
 // 렌더러(화면)에서 난 줄도 파일에 남긴다 — 🐞 화면 오류처럼 main 을 거치지 않는 것들.
 //   ⚠ main 이 보낸 줄은 이미 파일에 있으므로 렌더러가 되보내지 않는다(중복 방지 — App.jsx onLog 참조).

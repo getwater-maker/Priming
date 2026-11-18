@@ -24,6 +24,7 @@
 > - 🌐 **AI 자막 교정 = 제안만(대본을 고치지 않는다 — 적용은 화면이 `edit-sentences` 로) · 번역 = SRT 파일만(`P.writeSrt` 의 `textOf` — 한국어 .srt 와 같은 시각)** · 호출은 `CA.ask({use:'spell'|'translate'})` 한 곳(`core/ai-subtitle` 이 프롬프트·안전 검사) · `test:aisub`.
 > - 🖼 **본 그림 불투명도·자르기 = 그룹 `look.opacity`·`look.crop` → `editInfo`(원본 v0.9.104 삽입 규칙을 그대로 재사용 — 빌더 `_editInfoForLook`·`_cropDims` · 렌더러 `editOf`/`cropFilter`)** · ① 칸 막대는 삽입과 같은 하위 메뉴(`tgtR`·`tgtLook`) · 자른 그룹엔 배경색을 굽지 않는다 · `test:grpopac`.
 > - 🔇 **노이즈 줄이기 = 문장 `s.denoise`(1~3) → 문장 MP3 사본에 `afftdn`(볼륨과 같은 굽기)** — ⛔ `tn=1`(추적)은 일정한 잡음을 못 줄인다(실측) → `CE.noiseFloorDb` 로 잰 값을 `nf` 로 · `test:denoise`.
+> - 🎵🤖 **배경음악 선곡 = `core/bgm-pick` 한 곳(폴더 읽기만 · AI 선곡은 대본 이름으로 기억 · 실패 = 예전 해시 곡) · 도입부만 = `bgm.scope:'intro'` → 빌더가 도입부 clip 에만 링크 + `.vrew.fx.json` `bgmIntro`** — ⛔ Pixabay 페이지를 자동으로 긁지 않는다(음악 API 없음 · 🔎 는 검색 페이지만 연다) · ⛔ 「전체」일 때 `scope` 를 싣지 않는다(지문) · `test:bgm`(v1.0.65).
 > - 🗂🔊 **내 미디어·효과음 = 설정 폴더(`app-folders.json` media·sfx)를 `core/media-lib` 이 읽기만 해 키워드로 찾고, 넣기는 기존 `overlay-op add` 한 길** · `test:medialib`.
 > - 🌐 **이중 자막 = 대본 `pr.dualSub{lang,srt}` → `.vrew.fx.json` 의 `dualSub`(전환·`pauseWins` 와 한 옆 파일 — `pipeline._syncFxPauseWins` 한 곳이 쓴다) → MP4 렌더러 `dualEvents`만** — ⛔ `.vrew` 빌더는 읽지 않는다 · `test:dualsub`.
 > - 🎞 **장면 전환 찾기 = `core/scene-detect`(ffmpeg 장면 점수 · 찾기만 · 밝기 변화 기준)** · 📋 **효과 템플릿 = `core/templates`(효과 한 벌 · 자리·순서·켄번스 구간은 담지도 건드리지도 않는다)** · `test:scenes`·`test:templates`.

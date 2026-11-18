@@ -370,6 +370,21 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.waitForTimeout(500); await menu('삽입');
     const ovf2 = await win.evaluate(() => { const r = document.querySelector('.ribbon'); return { o: r.scrollWidth - r.clientWidth, h: r.getBoundingClientRect().height }; });
     ok(ovf2.o <= 1 && Math.abs(ovf2.h - hFmt) < 1, `1366px 에서도 넘치지 않는다 (${JSON.stringify(ovf2)})`);
+    // 🎵▾ 배경음악 더 보기(v1.0.65) — 깔 곳·🤖 AI 선곡·🔎 Pixabay 를 팝업으로(리본 한 줄을 지키려고)
+    ok((await win.locator('[data-testid=bgm-file]').count()) === 1 && !(await win.locator('.ribbon').innerText()).includes('파일…'), '「파일…」 → 고른 곡 이름 · 비면 「파일」');
+    await win.click('[data-testid=bgm-more]');
+    await win.waitForSelector('[data-testid=bgm-menu]', { timeout: 3000 }).catch(() => {});
+    const bm = await win.evaluate(() => { const el = document.querySelector('[data-testid=bgm-scope]'); if (!el) return null; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { hit: !!hit && (hit === el || el.contains(hit)), ai: document.querySelector('[data-testid=bgm-ai]').disabled, pix: !!document.querySelector('[data-testid=bgm-pixabay]'), inView: r.bottom <= innerHeight && r.right <= innerWidth }; });
+    ok(bm && bm.hit && bm.inView, `▾ 팝업이 열리고 「깔 곳」이 실제로 눌린다 ${JSON.stringify(bm)}`);
+    ok(bm && bm.ai === true && bm.pix, '파일 하나를 고른 채널은 🤖 AI 선곡이 꺼져 있다(폴더일 때만) · 🔎 Pixabay 단추');
+    await win.selectOption('[data-testid=bgm-scope]', 'intro');
+    await win.waitForTimeout(700);
+    const pd2 = await win.evaluate(async (n) => { const p = await window.api.getPresetDetail(n); return { scope: p.bgmScope, ai: p.bgmAi, vol: p.bgmVolume }; }, CH);
+    ok(pd2.scope === 'intro' && pd2.ai === false && Number(pd2.vol) === 25, `「도입부만」 채널에 저장 (${JSON.stringify(pd2)})`);
+    await win.mouse.click(700, 450); await win.waitForTimeout(300);
+    ok((await win.locator('[data-testid=bgm-menu]').count()) === 0 && /도입/.test(await win.locator('[data-testid=bgm-more]').innerText()), '바깥을 누르면 닫힌다 · ▾ 단추에 「도입」 표시');
+    await win.click('[data-testid=bgm-more]'); await win.waitForSelector('[data-testid=bgm-menu]', { timeout: 3000 }).catch(() => {});
+    await win.selectOption('[data-testid=bgm-scope]', 'all'); await win.waitForTimeout(500); await win.mouse.click(700, 450); await win.waitForTimeout(300);
     await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows()[0].setSize(1600, 950); });
     await win.waitForTimeout(400);
 

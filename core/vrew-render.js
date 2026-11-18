@@ -273,7 +273,7 @@ function buildTimeline(project, mediaDir) {
   const inserts = [];
   for (const sp of bgmSpans.values()) {
     const tr = sp.track, f = fileOf(tr); if (!f) continue;
-    const it = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false, t0: sp.start, t1: sp.end, video: !!sp.video };
+    const it = { file: f, volume: isFinite(+tr.volume) ? +tr.volume : 0.15, loop: tr.loop !== false, t0: sp.start, t1: sp.end, video: !!sp.video, tid: tr.trackId };
     if (!bgm && !sp.video && sp.start < 0.05 && sp.end > t - 0.05) bgm = it; else inserts.push(it);
   }
   return { segments, cues, audio, overlays, capStyle, bgm, inserts, totalSec: t };
@@ -1061,7 +1061,8 @@ function mixArgs(tl) {
     args.push('-i', x.file);
     const D = Math.max(0.1, (x.full ? T : x.t1 - x.t0));
     //   🔊 영상 자체의 소리(그룹 영상 소리 선택 · ➕ 삽입 영상)는 짧게만 — 앞을 0.5초 키우면 대사 첫 마디가 먹힌다(v1.0.61)
-    const fi = x.full ? Math.min(2, D / 4) : x.video ? Math.min(0.04, D / 4) : Math.min(0.5, D / 4), fo = x.full ? Math.min(3, D / 4) : x.video ? Math.min(0.15, D / 4) : Math.min(1, D / 4);
+    //   🎵 도입부만 깐 채널 배경음(soft · v1.0.65)은 전체 배경음과 같은 페이드(앞 2초 · 끝 3초) — 1초로 끊기면 도입부 끝이 툭 끊긴다
+    const fi = (x.full || x.soft) ? Math.min(2, D / 4) : x.video ? Math.min(0.04, D / 4) : Math.min(0.5, D / 4), fo = (x.full || x.soft) ? Math.min(3, D / 4) : x.video ? Math.min(0.15, D / 4) : Math.min(1, D / 4);
     const vol = Math.max(0, Math.min(2, isFinite(+x.volume) ? +x.volume : 0.15));
     const ms = Math.round((x.full ? 0 : x.t0) * 1000);
     parts.push(`[${k + 1}:a]aresample=${A_RATE},aformat=sample_fmts=fltp:channel_layouts=stereo,volume=${vol.toFixed(3)},`
@@ -1251,6 +1252,7 @@ async function renderVrewToMp4(opts = {}) {
     // 🎬 그룹별 화면 전환(효과 ⑥) — 빌더가 .vrew 옆에 둔 <이름>.vrew.fx.json(trackId → {type, sec}). 없거나 못 읽으면 전환 없음(컷)
     let perTrans = null, userPauseWins = null, dualFx = null;
     try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.trans && typeof j.trans === 'object' && Object.keys(j.trans).length) perTrans = j.trans; if (j && Array.isArray(j.pauseWins)) userPauseWins = j.pauseWins.filter((w) => Array.isArray(w) && w[1] > w[0]); if (j && j.dualSub && j.dualSub.srt) dualFx = j.dualSub; } } catch (_) {}   // 🕳 pauseWins = 빈 클립 쉼 창(자막을 뺀다)
+    try { const fxp = opts.vrewPath + '.fx.json'; if (fs.existsSync(fxp)) { const j = JSON.parse(fs.readFileSync(fxp, 'utf8')); if (j && j.bgmIntro) for (const x of (tl.inserts || [])) if (x.tid === j.bgmIntro) x.soft = true; } } catch (_) {}   // 🎵 도입부 배경음(빌더가 알린 트랙) = 긴 페이드
     // 🎞 ⑱ 샷 나누기(2.0 주문 shots 만 · core/shot-plan) — 한 그림이 maxSec 보다 오래 보이면 같은 그림 안에서 다른 움직임 · 틀로 나눈다 · 없으면 구간 그대로
     let shotPlan = null;
     if (opts.shots) {
