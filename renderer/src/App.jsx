@@ -648,6 +648,8 @@ export default function App() {
   const [presetName, setPresetName] = useState('');
   // 🔊 지금 채널의 기본 영상 소리(채널 편집 ▸ 제작 도구) — ② 그룹 메뉴 「볼륨」의 「채널 기본값」
   const chanVsound = useMemo(() => VLook.normChanVsound(((presets || []).find((p) => p.name === presetName) || {}).videoSound), [presets, presetName]);
+  const chanVsoundRef = useRef(null); chanVsoundRef.current = chanVsound;
+  const vaMemoRef = useRef(new Map());   // 🔊 영상 경로 → 소리 트랙 있음(미리보기)   // ▶ 미리보기 재생(한 번 만든 비동기 흐름)이 지금 값을 읽게
   const preBookPresetRef = useRef('');   // 출판 탭에 들어오기 전 채널
   const [reloadTick, setReloadTick] = useState(0);   // 🔁 밖에서 바뀐 대본을 자동으로 다시 읽은 횟수
   const [styleId, setStyleId] = useState('chibi');
@@ -4754,6 +4756,23 @@ export default function App() {
     for (const o of (pr.overlays || [])) if (o.kind !== 'audio' && ovIn(o, ord, rg)) out.push(ovAsLayer(o));   // ➕ 삽입 그림·영상 — 늘 맨 위 · 클립(줄) 단위
     return out;
   }
+  // 🔊 그룹 영상 소리(v1.0.61) — 미리보기도 빌더와 같은 규칙: effVsound(그룹 > 채널) + 영상 파일에 소리 트랙이 있을 때만(main media-has-audio · 기억)
+  function vsndOfLayer(L) {
+    if (!L || L.ovId || !L.videoPath) return null;
+    const vs = VLook.effVsound(L, chanVsoundRef.current); if (!vs) return null;
+    return vaMemoRef.current.get(L.videoPath) === true ? vs : null;
+  }
+  async function prepVsound(pr) {   // 재생 전에 소리를 고른 영상 그룹의 소리 트랙 유무를 물어 둔다(처음 한 번 · 이후 기억)
+    if (!pr || !api.mediaHasAudio) return;
+    const ps = (pr.cuts || []).filter((x) => x.videoPath && VLook.effVsound(x, chanVsoundRef.current) && !vaMemoRef.current.has(x.videoPath)).map((x) => x.videoPath);
+    await Promise.all(ps.map(async (p) => { try { vaMemoRef.current.set(p, !!(await api.mediaHasAudio(p))); } catch (_) { vaMemoRef.current.set(p, false); } }));
+  }
+  /** 지금 화면 그림들 기준 내레이션 배율 — 영상 소리만 = 0 · 섞기 = nar% · 없으면 1 */
+  function narFactorNow() {
+    let f = 1;
+    for (const L of ((stageLayersRef.current || {}).layers || [])) { const vs = vsndOfLayer(L); if (vs) f = Math.min(f, vs.mode === 'video' ? 0 : (vs.nar != null ? vs.nar : 100) / 100); }
+    return f;
+  }
   function setVisual(c, pr, sentIdx, extraSec, rg) {
     const v = stageVisualRef.current; if (!v) return;
     const layers = pr ? visLayersAt(pr, c, sentIdx, rg) : (c && (c.imagePath || c.videoPath) ? [c] : []);
@@ -4762,10 +4781,16 @@ export default function App() {
     stageLayersRef.current = { pr, layers };
     if (!layers.length) { v.innerHTML = `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#998">이미지나 비디오가 없음</div>`; return; }
     v.innerHTML = layers.map(layerHtml).join('');
-    // 🔊 재생 중이면 삽입 영상의 소리를 켠다(그룹 영상은 늘 음소거 — 내레이션과 겹친다)
-    if (playingRef.current) for (const c of layers) if (c.ovId && c.videoPath) {
-      const vv = v.querySelector('.vlayer[data-num="' + c.num + '"] video');
-      if (vv && c.ovVol > 0) { vv.muted = false; vv.volume = Math.min(1, c.ovVol / 100); }
+    // 🔊 재생 중이면 삽입 영상의 소리를 켠다 · 그룹 영상은 「🔊 볼륨」(영상 소리)을 고른 그룹만(v1.0.61 · .vrew·MP4 와 같은 effVsound)
+    if (playingRef.current) for (const c of layers) if (c.videoPath) {
+      const vv = v.querySelector('.vlayer[data-num="' + c.num + '"] video'); if (!vv) continue;
+      if (c.ovId) { if (c.ovVol > 0) { vv.muted = false; vv.volume = Math.min(1, c.ovVol / 100); } continue; }
+      const vs = vsndOfLayer(c);
+      if (vs) {
+        vv.muted = false; vv.volume = Math.min(1, vs.vol / 100);   // 미리보기는 100% 까지(그 이상은 .vrew·MP4 에 반영)
+        // 반복 재생으로 처음으로 돌아가면 소리를 끈다 — 빌더도 영상 소리는 처음 한 번만 낸다(대사가 되풀이되지 않게)
+        let last = 0; vv.addEventListener('timeupdate', () => { if (vv.currentTime + 0.3 < last) vv.muted = true; last = vv.currentTime; });
+      }
     }
     // 🎬 재생 중엔 영상을 **흐른 시간만큼 건너뛴 자리**에서 튼다 — 중간 클립부터 재생하거나 그룹이 바뀌어 화면을 다시 깔아도
     //   삽입 영상·이어 깐 영상이 처음으로 되돌아가지 않게(v0.5.59 · .vrew 는 원래 이어진다)
@@ -4776,7 +4801,7 @@ export default function App() {
         const so = L.ovId ? L.ovFrom : (L.span ? L.span.from : ordOf(pr, L, 0));
         const t = secBetween(pr, so, ord) + (Number(extraSec) || 0);
         if (!(t > 0.05)) continue;
-        const seek = () => { const d = vv.duration; if (!(d > 0)) return; if (L.once && t >= d) { try { vv.currentTime = Math.max(0, d - 0.05); vv.pause(); } catch (_) {} } else { try { vv.currentTime = t % d; } catch (_) {} } };
+        const seek = () => { const d = vv.duration; if (!(d > 0)) return; if (L.once && t >= d) { try { vv.currentTime = Math.max(0, d - 0.05); vv.pause(); } catch (_) {} } else { try { vv.currentTime = t % d; } catch (_) {} if (t >= d && !L.ovId) vv.muted = true; /* 🔊 한 바퀴 지난 자리 — 영상 소리는 이미 끝났다 */ } };
         if (vv.readyState >= 1) seek(); else vv.addEventListener('loadedmetadata', seek, { once: true });
       }
     }
@@ -5119,6 +5144,8 @@ export default function App() {
     const skip0 = (start && start.offSec != null) ? Math.max(lineStart0, Math.min(_d0, start.offSec)) : lineStart0;
     const skipMs0 = (skip0 - lineStart0) * 1000;   // 그 줄 안에서 이미 지나간 시간 — 첫 줄 자막이 그만큼 짧게 보인다
     insAudStartRef.current = { ord: _prP ? ordOf(_prP, c, si0) : -1, sec: skip0 };
+    await prepVsound(_prP);   // 🔊 영상 소리를 고른 그룹 — 소리 트랙 유무(처음 한 번)
+    if (stale(_g)) return;
     const rg0 = CF.lineRanges(sents[si0].text || '', clips0)[li0];
     setVisual(c, _prP, si0, skip0, rg0); if (playerInfoRef.current) playerInfoRef.current.textContent = info;
     for (let si = si0; si < sents.length; si++) {
@@ -5143,7 +5170,7 @@ export default function App() {
           const url = await api.readAudio(s.audio);
           if (url) {
             const a = new Audio(url); curAudioRef.current = a;
-            a.volume = Math.max(0, Math.min(1, s.vl != null ? s.vl : 1));   // 🔉 볼륨 조절(미리보기는 100% 까지 — 그 이상은 .vrew·MP4 에 반영)
+            a.volume = Math.max(0, Math.min(1, (s.vl != null ? s.vl : 1) * narFactorNow()));   // 🔉 볼륨 조절(미리보기는 100% 까지 — 그 이상은 .vrew·MP4 에 반영) · 🔊 영상 소리를 고른 그룹이면 내레이션을 줄이거나 끈다
             if (si === si0 && skip0 > 0.001) {
               await new Promise((r) => { if (a.readyState >= 1) r(); else { a.addEventListener('loadedmetadata', r, { once: true }); a.addEventListener('error', r, { once: true }); } });
               try { a.currentTime = Math.min(skip0 * ((a.duration || dur) / dur), (a.duration || dur)); } catch (_) {}

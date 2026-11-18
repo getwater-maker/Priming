@@ -185,6 +185,8 @@ const mkVideo = (name, sec, withAudio) => {
   ok(/data-testid="mn-vsnd"/.test(APP) && /data-testid="mn-upscale"/.test(APP) && /onUpscale=\{runUpscale\}/.test(APP), '② 그룹 메뉴: 🔊 볼륨 · ⬆ 업스케일');
   ok(/data-testid="ch-vsnd"/.test(APP) && (APP.match(/videoSound: VLook\.normChanVsound\((p|ch)\.videoSound\)/g) || []).length === 2, '채널 편집 ▸ 제작 도구 「🔊 영상 소리」 — 읽기·저장 두 곳에 실린다');
   ok(/ipcMain\.handle\('upscale-group'/.test(MAIN) && /upscaleGroup:/.test(read('preload.js')) && /effVsound\(g, S\.preset && S\.preset\.videoSound\)/.test(MAIN), 'main: upscale-group IPC · AI 영상 소리 켜기는 채널 기본값까지 본다');
+  ok(/function vsndOfLayer/.test(APP) && /narFactorNow\(\)\)\)/.test(APP) && /await prepVsound\(_prP\)/.test(APP) && /ipcMain\.handle\('media-has-audio'/.test(MAIN) && /mediaHasAudio:/.test(read('preload.js')), '▶ 미리보기도 같은 규칙 — 영상 소리를 고른 그룹은 영상 소리를 켜고 내레이션을 줄이거나 끈다(소리 트랙이 있을 때만)');
+  ok(/🐢 프로그램이/.test(MAIN) && /_mainLag\.last = ch/.test(MAIN), 'main 멈춤 감시 — 2.5초 넘게 막히면 직전 요청과 함께 로그');
   ok(/x\.video \? Math\.min\(0\.04/.test(REND), '렌더러: 영상 소리는 앞 페이드를 짧게(대사 첫 마디가 먹히지 않게)');
   try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
   console.log(`\n${fail ? '❌' : '✅'} vsound ${pass}/${pass + fail}`);

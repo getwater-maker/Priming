@@ -190,8 +190,19 @@ if (ED.EDITION !== 'studio') {
   const orig = ipcMain.handle.bind(ipcMain);
   ipcMain.handle = (ch, fn) => orig(ch, (e, ...a) => {
     if (!LIC_OPEN.has(ch) && !licOk()) throw new Error('로그인이 필요합니다 — Priming 회원으로 로그인하세요.');
+    _mainLag.last = ch; _mainLag.at = Date.now();
     return fn(e, ...a);
   });
+}
+// 🐢 main 멈춤 감시(v1.0.61 · 로이 2026-11-18 「응답 없음」 — 재현이 안 돼 원인을 로그로 남긴다): 0.5초 타이머가 2.5초 넘게 늦으면
+//   그동안 main 이 막혀 있었다는 뜻 → 직전에 들어온 IPC 이름과 함께 한 줄 남긴다(창 「응답 없음」은 main 이 5초 넘게 막힐 때 뜬다).
+const _mainLag = { last: '', at: 0 };
+{
+  let _t = Date.now();
+  setInterval(() => {
+    const now = Date.now(), lag = now - _t - 500; _t = now;
+    if (lag > 2500) { try { log(`🐢 프로그램이 ${(lag / 1000).toFixed(1)}초 멈춰 있었습니다 — 직전 요청: ${_mainLag.last || '없음'}(${_mainLag.at ? Math.round((now - _mainLag.at) / 1000) + '초 전' : '-'})`); } catch (_) {} }
+  }, 500).unref();
 }
 
 // WORLD가 대본을 고정한 뒤 공통 진행 수명주기를 적용한다.
@@ -10066,6 +10077,15 @@ ipcMain.handle('edit-group-image', (_e, args = {}) => {
   }, 'comfy');
 });
 
+// 🔊 영상 파일에 소리 트랙이 있나(미리보기 영상 소리 · v1.0.61) — 비동기 ffmpeg 한 번 · 경로+크기+시각으로 기억
+const _hasAudMemo = new Map();
+ipcMain.handle('media-has-audio', async (_e, p) => {
+  const key = _visKey(p); if (!key) return false;
+  if (_hasAudMemo.has(key)) return _hasAudMemo.get(key);
+  let v = false; try { v = await require('./core/media-utils').hasAudioStream(p); } catch (_) { v = false; }
+  if (_hasAudMemo.size > 2000) _hasAudMemo.clear();
+  _hasAudMemo.set(key, v); return v;
+});
 // ⬆ 그룹 하나 업스케일(v1.0.61 · 로이 2026-11-18 · ② 그룹 메뉴 「⬆ 업스케일」) — 영상이 있으면 영상(core/upscaler.upscaleVideo · 소리 그대로),
 //   없으면 그림(upscaleImage · Real-ESRGAN 2배). 새 파일(영상 `NN_1080.mp4` · 그림 `NN_up.png`)로 쓰고 경로만 바꾼다 — ⛔ 원본을 지우지 않는다(Ctrl+Z = 원본으로).
 //   이미 목표 해상도(캔버스) 이상이면 하지 않고 알린다 · 레인 'upscale'(자동 업스케일과 겹치지 않게).
