@@ -192,3 +192,46 @@
 
 ### 답으로 받고 싶은 것
 - 배포 날짜 · 토큰이 없을 때 판매판 응답(어떤 오류 코드로 알리는지) · 무효 토큰 + `edition=member` 처리 · 판매판 Release 가 없을 때 `/installer` 동작.
+
+---
+
+## 회신 2 — wise-priming (2026-11-05 밤) · 덧붙임 2 처리
+
+**상태: 코드·시험 끝(시험 40개 통과) · 커밋됨 · ⏸ Worker 배포는 로이가 `GITHUB_TOKEN` 을 넣은 뒤.** 토큰이 없는 채로 배포하면 판매판 요청이 전부 503 이 되므로 하지 않았다(지금 떠 있는 Worker 는 이전 버전 그대로 — 회원은 옛 경로를 받는다).
+
+### 바꾼 것 (`workers/priming-updates`)
+- **판 → 저장소**: `edition=member` 면 토큰이 무엇이든(없음·무효·만료·유효 회원·관리자) **판매판 = `Priming-Member` main**. 이때 토큰은 확인하지도 않는다. 그 밖(`edition=studio` 또는 없음)은 관리자만 로이판(`Priming` main), 나머지(유효 회원·회원 아님·만료·토큰 없음)는 판매판. → 오늘 사고(관리자 + edition=member → 로이판) 해소.
+- `/manifest`(판매판): `Priming-Member` 의 `update-manifest.json` 을 요청마다 새로 읽어 그대로. **`ref` 요구 없음.** 없거나 `edition` 이 `"member"` 가 아니면 404 `{"error":"no_member_release"}`.
+- `/file/<경로>`(판매판): 판매판 매니페스트 `files` 에 있는 경로만 `Priming-Member` main 에서, 아니면 404 `not_in_manifest`(`core/roy-bank.js`·`tools/order.js` 시험 통과). 매니페스트 60초 기억 + 목록에 없으면 한 번 새로 읽기 그대로.
+- `/installer`·`/installer/info`·`/installer/link`: 판매판 = `Priming-Member` Release 의 `Priming-Setup-` 최신(버전 비교) · 관리자 = `Priming` Release 의 `Priming-Studio-Setup-` 최신(없으면 옛 `Priming-Setup-`) 그대로.
+- `wrangler.toml` `[vars]` 에 `GH_REPO_MEMBER = "Priming-Member"` 추가.
+
+### 답
+- **배포 날짜**: 미정 — 로이가 `GITHUB_TOKEN` 을 넣은 직후(같은 날). 순서: 토큰 → 내가 `wrangler deploy --keep-vars` → `curl "https://updates.primingwave.com/manifest?edition=member"` 로 판매판 매니페스트 확인.
+- **토큰이 없을 때**: 판매판 응답은 **503 `{"error":"no_github_token"}`**(404 로 두면 앱이 「판매판 없음」으로 오해). 로이판(관리자) 응답은 영향 없음(공개 저장소). 앱은 이 코드를 「일시 오류」로 보고 업데이트를 건너뛰면 된다.
+- **무효 토큰 + `edition=member`**: 판매판을 그대로 준다(토큰을 아예 보지 않음). 무효 토큰 + edition 없음/studio 는 지금처럼 401 `invalid_token`(인증 서버 장애 502 `auth_unavailable` 도 그대로) — 로이판 앱이 판매판으로 내려앉지 않게.
+- **판매판 Release 가 없을 때 `/installer`**: **404 `no_release`**(저장소에 Release 가 아예 없음 · 비공개 저장소를 토큰 없이 읽은 경우도 GitHub 가 404) 또는 **404 `no_installer`**(Release 는 있는데 `Priming-Setup-` 자산이 없음). `Priming`(로이판) 의 옛 설치본으로는 **떨어지지 않는다** — 로이판 빌드가 회원에게 나가는 것을 막기 위해. 사이트 카드는 이때 「설치 파일 정보를 불러오지 못했습니다」로 보인다.
+- 사이트 내려받기 카드는 `edition` 없이 `/installer/*` 를 부르므로 그대로: 회원 = 판매판 설치본 · 관리자 = 로이판 설치본. 관리자용 「판매판 설치본」 단추는 아직 없다(선택 — 필요하면 말해 달라).
+- **`/health` 에 토큰 유효 여부**는 넣지 않았다(지금 `/health` 는 인증 없이 `ok` 만 준다 — 토큰 확인은 GitHub 호출을 일으키므로 따로 정하자). 만료 1년 달력 표시는 로이가.
+- 참고: 직전 커밋 `66483e8`(로그인 전·회원 아님도 판매판)의 규칙은 그대로 이어받았다.
+
+---
+
+## 회신 3 — 배포 (wise-priming, 2026-11-19 06:40 KST)
+
+**상태: 배포 끝 · 판매판이 `Priming-Member` 에서 나온다.**
+
+- 배포한 코드: wise-priming `12b8cfb`(커밋 안 된 변경 없음, 시험 40개 통과) · `npx wrangler@4 deploy --keep-vars`
+- **버전 ID `cd1a8c9c-5e35-4b93-8933-e9dce57cb7e4`**(직전 `c0c6e8cd` = 토큰 교체본). 비밀값 `GITHUB_TOKEN`·변수 `SUPABASE_URL`·`SUPABASE_ANON_KEY` 그대로 남아 있음(`wrangler versions view` 로 확인). 토큰 값은 건드리지 않았다.
+
+### 배포 뒤 확인
+| 요청 | 결과 |
+|---|---|
+| `/health` | 200 `ok` |
+| `/manifest?edition=member` | 200 · **1.0.43** · `edition: member` · `ref` 없음(`source` 있음) · `X-Priming-Edition: member` (배포 전에는 1.0.35 + `ref` = 옛 경로) |
+| `/file/main.js?edition=member` | 200 |
+| `/file/core/roy-bank.js?edition=member` | 404 `not_in_manifest` |
+| `/installer/info` · `?edition=member` | 200 · `member-v1.0.38` · `Priming-Setup-1.0.38.exe` (배포 전에는 `Priming` 저장소의 `member-v1.0.35`) |
+| 무효 토큰 + edition 없음 `/manifest` | 401 `invalid_token` (Supabase 인증 경로 정상) |
+
+- ⚠ **확인 못 한 것**: 관리자 토큰으로 받는 로이판 매니페스트(`edition=studio` + 관리자). 관리자 로그인 토큰이 없어 직접 부르지 못했다. 로이 PC 의 로이판 앱이 다음에 업데이트를 확인할 때 로그에 `최신 상태` 또는 `업데이트 적용` 이 찍히면 된다. 이상하면 `npx wrangler@4 rollback c0c6e8cd-532e-4a7b-a828-bba42b216db1` 로 되돌린다.
