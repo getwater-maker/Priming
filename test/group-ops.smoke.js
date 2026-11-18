@@ -129,47 +129,84 @@ const md = () => fs.readFileSync(MD, 'utf8');
     await win.keyboard.press('Control+z'); await win.waitForTimeout(1000);
     ok((await groups()).length === 2 && md() === md0, 'Ctrl+Z 한 번에 그룹도 대본(.md)도 원래대로');
 
-    console.log('\n[2c] ＋ 클립 추가 팝업');
+    console.log('\n[2c] ＋ 클립 추가 — 그 자리에 점선 패널(Vrew · v1.0.63)');
+    // 🧪 음성 만들기·미리 듣기는 가짜 처리기로(실제 TTS 서버를 부르지 않는다) — 부른 인자만 기억한다
+    const pvWav = path.join(outDir, 'pv.wav');
+    require('child_process').execFileSync(require('../core/media-utils').getFfmpegPath(), ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=500:d=0.6', pvWav]);
+    await app.evaluate(({ ipcMain }, wav) => {
+      global.__ttsCalls = []; global.__pvCalls = [];
+      ipcMain.removeHandler('tts-sentences'); ipcMain.handle('tts-sentences', async (_e, a) => { global.__ttsCalls.push(a); return null; });
+      ipcMain.removeHandler('clip-voice-preview'); ipcMain.handle('clip-voice-preview', async (_e, a) => { global.__pvCalls.push(a); return { ok: true, path: wav, dur: 0.6 }; });
+    }, pvWav);
     cl = await clips();
     const n1 = nOf(/^첫째/);
+    const topOf = (n) => win.evaluate((k) => { const e = document.querySelector(`.sent.clip[data-ln="${k}"]`); return e ? Math.round(e.getBoundingClientRect().top) : null; }, n);
+    await hoverGap(n1);
+    const nextTop0 = await topOf(n1 + 1);
+    await win.locator(`.sent.clip[data-ln="${n1}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(400);
+    ok(await win.locator('[data-testid="clip-add-pop"]').isVisible(), '「＋ 클립 추가」 를 누르면 패널');
+    const lab = await win.locator('[data-testid="clip-add-pop"] button').allInnerTexts();
+    ok(lab.map((t) => t.trim()).join('|') === 'AI 목소리 클립|빈 클립|이미지 클립|비디오 클립', '카드 넷 — ' + lab.map((t) => t.trim()).join(' / '));
+    const geo = await win.evaluate((k) => { const r = document.querySelector(`.sent.clip[data-ln="${k}"]`).getBoundingClientRect(), p = document.querySelector('[data-testid="clip-add-pop"]').getBoundingClientRect(), nx = document.querySelector(`.sent.clip[data-ln="${k + 1}"]`).getBoundingClientRect(); return { rb: Math.round(r.bottom), pt: Math.round(p.top), pb: Math.round(p.bottom), nt: Math.round(nx.top), dash: getComputedStyle(document.querySelector('[data-testid="clip-add-pop"]')).borderTopStyle }; }, n1);
+    ok(geo.pt >= geo.rb - 2 && geo.pb <= geo.nt + 2 && geo.dash === 'dashed', '🔑 패널이 그 클립과 다음 클립 **사이**에 펼쳐진다(점선 테두리) ' + JSON.stringify(geo));
+    ok(nextTop0 != null && (await topOf(n1 + 1)) - nextTop0 > 60, `다음 클립이 패널 높이만큼 아래로 밀린다(${nextTop0} → ${await topOf(n1 + 1)})`);
+    await win.mouse.click(5, 300); await win.waitForTimeout(300);
+    ok(await win.locator('[data-testid="clip-add-pop"]').count() === 0, '다른 곳을 누르면 패널이 닫힌다');
+    // 🗣 AI 목소리 클립 — 입력 줄 → 확인 ↵
     await hoverGap(n1);
     await win.locator(`.sent.clip[data-ln="${n1}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    ok(await win.locator('[data-testid="clip-add-pop"]').isVisible(), '「＋ 클립 추가」 를 누르면 팝업');
-    const lab = await win.locator('[data-testid="clip-add-pop"] button').allInnerTexts();
-    ok(lab.map((t) => t.trim().replace(/^\S+\s*/, '')).join('|') === 'AI 목소리 클립|빈 클립|이미지 클립|비디오 클립', '네 가지 — ' + lab.map((t) => t.replace(/\s+/g, ' ')).join(' / '));
-    await win.locator('[data-testid="clip-add-voice"]').click(); await win.waitForTimeout(1500);
-    ok(/첫째 문장입니다\. 새 클립입니다\. 둘째 문장입니다\./.test(md()), '🔑 AI 목소리 클립 = 그 클립 뒤에 새 문장(대본 .md 에도) — ' + md().split('\n').find((l) => /첫째/.test(l)));
-    ok(await win.locator('textarea').count() >= 1, '새 클립의 글 편집칸이 바로 열린다');
-    await win.keyboard.press('Escape'); await win.waitForTimeout(300);
+    await win.locator('[data-testid="clip-add-voice"]').click(); await win.waitForTimeout(500);
+    ok(await win.locator('[data-testid="clip-voice-add"]').isVisible() && await win.locator('[data-testid="clip-add-pop"]').count() === 0, '「AI 목소리 클립」 → 그 자리에 입력 줄');
+    const ph = await win.locator('[data-testid="clip-voice-text"]').getAttribute('placeholder');
+    ok(ph === '텍스트를 입력하시면 AI 목소리가 읽어드립니다', '자리표시 글 — ' + ph);
+    ok(await win.evaluate(() => document.activeElement && document.activeElement.dataset.testid === 'clip-voice-text'), '입력칸에 바로 쓸 수 있다(초점)');
+    ok(await win.locator('[data-testid="clip-voice-ok"]').isDisabled() && await win.locator('[data-testid="clip-voice-pv"]').isDisabled(), '글이 없으면 「확인」·「미리 듣기」 를 누를 수 없다');
+    ok(/🗣 /.test(await win.locator('[data-testid="clip-voice-add"] .clip-spk').innerText()) && await win.locator('[data-testid="clip-voice-x"]').isVisible(), '화자 이름 · ✕');
+    await win.keyboard.type('새로 쓴 목소리 클립입니다');
+    await win.locator('[data-testid="clip-voice-pv"]').click(); await win.waitForTimeout(700);
+    const pv = await app.evaluate(() => global.__pvCalls.slice(-1)[0] || null);
+    ok(pv && pv.text === '새로 쓴 목소리 클립입니다' && md() === md0, '🎧 미리 듣기 — 그 글로 임시 합성을 부른다 · 대본은 그대로 ' + JSON.stringify(pv && pv.text));
+    await win.locator('[data-testid="clip-voice-text"]').press('Enter'); await win.waitForTimeout(1500);
+    ok(/첫째 문장입니다\. 새로 쓴 목소리 클립입니다\. 둘째 문장입니다\./.test(md()), '🔑 확인 ↵ = 그 클립 뒤에 새 문장(대본 .md 에도) — ' + md().split('\n').find((l) => /첫째/.test(l)));
+    ok(await win.locator('[data-testid="clip-voice-add"]').count() === 0, '입력 줄은 닫힌다');
+    const tc = await app.evaluate(() => global.__ttsCalls.slice(-1)[0] || null);
+    ok(tc && tc.items && tc.items.length === 1 && tc.items[0].groupNum === 1 && tc.items[0].sentIdx === 1, '그 새 문장 하나의 음성을 만든다 ' + JSON.stringify(tc && tc.items));
     g = await groups();
-    ok(g.length === 2 && /^첫째.*새 클립입니다.*둘째/.test(g[0]), '같은 그룹 안에 들어갔다 ' + JSON.stringify(g[0]));
+    ok(g.length === 2 && /^첫째.*새로 쓴 목소리 클립입니다.*둘째/.test(g[0]), '같은 그룹 안에 들어갔다 ' + JSON.stringify(g[0]));
     await win.keyboard.press('Control+z'); await win.waitForTimeout(1000);
     ok(md() === md0 && (await groups()).length === 2, 'Ctrl+Z 한 번에 원래대로');
-    // 빈 클립 — 자리표시 글이 통째로 골라진 채 열린다(바로 쓰면 바뀐다)
+    // ✕ = 아무것도 안 바뀐다
     await hoverGap(n1);
     await win.locator(`.sent.clip[data-ln="${n1}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="clip-add-empty"]').click(); await win.waitForTimeout(1500);
-    ok(/첫째 문장입니다\. 새 클립입니다\. 둘째 문장입니다\./.test(md()), '빈 클립도 그 클립 뒤에 새 클립이 생긴다');
-    const sel = await win.evaluate(() => { const t = document.querySelector('textarea'); return t ? { a: t.selectionStart, b: t.selectionEnd, n: t.value.length, v: t.value } : null; });
-    ok(sel && sel.a === 0 && sel.b === sel.n && sel.n > 0, '새 클립의 글이 통째로 골라져 있다(바로 쓰면 바뀐다) ' + JSON.stringify(sel));
-    await win.keyboard.type('직접 쓴 빈 클립 글입니다.'); await win.keyboard.press('Enter'); await win.waitForTimeout(900);
-    ok(/첫째 문장입니다\. 직접 쓴 빈 클립 글입니다\. 둘째 문장입니다\./.test(md()), '골라진 글 위에 바로 써서 바꿨다 — ' + (md().split('\n').find((l) => /첫째/.test(l)) || ''));
+    await win.locator('[data-testid="clip-add-voice"]').click(); await win.waitForTimeout(400);
+    await win.keyboard.type('쓰다 만 글');
+    await win.locator('[data-testid="clip-voice-x"]').click(); await win.waitForTimeout(400);
+    ok(await win.locator('[data-testid="clip-voice-add"]').count() === 0 && md() === md0, '✕ 로 닫으면 아무것도 안 바뀐다');
+    // ⏱ 빈 클립 — 5초(1초 다섯 칸)
+    await hoverGap(n1);
+    await win.locator(`.sent.clip[data-ln="${n1}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
+    await win.locator('[data-testid="clip-add-empty"]').click(); await win.waitForTimeout(1200);
+    const pad = await win.evaluate(() => { const r = document.querySelector('[data-testid="clip-pad-row"]'); return r ? { chips: r.querySelectorAll('.cp-chip').length, t: r.innerText.replace(/\s+/g, ' ') } : null; });
+    ok(pad && pad.chips === 5 && /빈 클립/.test(pad.t) && /\+5초/.test(pad.t), '🔑 빈 클립 = 그 클립 뒤 5초(「1초」 다섯 칸) ' + JSON.stringify(pad));
+    ok(md() === md0, '빈 클립은 대본 글을 바꾸지 않는다(무음만)');
     await win.keyboard.press('Control+z'); await win.waitForTimeout(800);
-    await win.keyboard.press('Control+z'); await win.waitForTimeout(1000);
-    ok(md() === md0 && (await groups()).length === 2, 'Ctrl+Z 로 원래대로');
+    ok(await win.locator('[data-testid="clip-pad-row"]').count() === 0, 'Ctrl+Z 로 빈 클립이 사라진다');
 
-    console.log('\n[2d] 이미지 클립 · 비디오 클립 — 파일을 고르면 그것을 넣은 새 그룹');
+    console.log('\n[2d] 이미지 클립 · 비디오 클립 — 「이미지 • 비디오 클립 추가하기」 창');
     const imgPng = path.join(outDir, 'pick.png'); fs.writeFileSync(imgPng, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
     await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); }, imgPng);
     await hoverGap(n3);
     await win.locator(`.sent.clip[data-ln="${n3}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(1000);
-    ok(md() === md0 && (await groups()).length === 2, '파일을 고르지 않고 닫으면 아무것도 안 바뀐다(취소)');
+    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(600);
+    ok(await win.locator('[data-testid="clip-media-dlg"]').isVisible() && /이미지 • 비디오 클립 추가하기/.test(await win.locator('[data-testid="clip-media-dlg"]').innerText()), '「이미지 클립」 → 창이 열린다');
+    const tabs = await win.evaluate(() => ({ top: [...document.querySelectorAll('.cmp-top button')].map((b) => b.innerText.trim()), sub: [...document.querySelectorAll('.cmp-sub button')].map((b) => b.innerText.trim() + (b.classList.contains('on') ? '*' : '')), sub2: [...document.querySelectorAll('.cmp-sub2 button')].map((b) => b.innerText.trim()), pc: (document.querySelector('[data-testid="cmp-pc"]') || {}).innerText }));
+    ok(tabs.top.join('|') === '내 이미지 · 비디오|무료 이미지 · 비디오' && tabs.sub.join('|') === '전체|이미지*|비디오|GIF' && tabs.sub2.join('|') === '전체|즐겨찾기' && /PC에서 불러오기/.test(tabs.pc || ''), 'Vrew 탭 그대로(이미지 탭이 골라진 채) ' + JSON.stringify(tabs));
+    await win.locator('[data-testid="cmp-pc"]').click(); await win.waitForTimeout(1000);
+    ok(md() === md0 && (await groups()).length === 2 && await win.locator('[data-testid="clip-media-dlg"]').isVisible(), 'PC 에서 파일을 고르지 않고 닫으면 아무것도 안 바뀐다(창은 그대로)');
     await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, imgPng);
     const thumbs0 = await win.locator('.pg-row .pg-thumb img').count();
-    await hoverGap(n3);   // 셋째 = G2 첫 문장 → 그룹 한가운데
-    await win.locator(`.sent.clip[data-ln="${n3}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(1800);
+    await win.locator('[data-testid="cmp-pc"]').click(); await win.waitForTimeout(1800);   // 셋째 = G2 첫 문장 → 그룹 한가운데
+    ok(await win.locator('[data-testid="clip-media-dlg"]').count() === 0, '고르면 창이 닫힌다');
     await win.keyboard.press('Escape'); await win.waitForTimeout(400);
     g = await groups();
     ok(g.length === 4 && g[1] === '셋째 문장입니다.' && g[2] === '새 클립입니다.' && /^가나다라/.test(g[3]), '🔑 앞(셋째) · 새 그룹(새 클립) · 뒤(긴 문장·다섯째) 로 셋이 됐다 ' + JSON.stringify(g));
@@ -182,26 +219,44 @@ const md = () => fs.readFileSync(MD, 'utf8');
     ok(hasImg, '3번째 그룹 칸에 그림이 있다');
     await win.keyboard.press('Control+z'); await win.waitForTimeout(1200);
     ok(md() === md0 && (await groups()).length === 2, 'Ctrl+Z 한 번에 대본 · 그룹 모두 원래대로');
-    // 앞 그룹에 그림이 있으면 뒤 그룹이 그 그림을 복사해 이어 갖는다(빈 공간 없음)
-    await win.evaluate(async () => { const q = await window.api.listQueue(); await window.api.attachAsset({ shortsNum: q.dto.projects[0].shortsNum, groupNum: 2 }); });
-    await win.waitForTimeout(500);
+    // 앞 그룹에 그림이 있으면 뒤 그룹이 그 그림을 복사해 이어 갖는다(빈 공간 없음) — 이번엔 「내 이미지」 목록에서 골라 넣는다
+    await win.locator('.cut').nth(1).locator('.thumb').first().click(); await win.waitForSelector('[data-testid=vr-menu]', { timeout: 3000 });   // 화면에서 G2 에 그림 첨부(대화상자 = pick.png)
+    await win.click('[data-testid=vr-menu] button:has-text("첨부")'); await win.waitForTimeout(800);
     await hoverGap(n3);
     await win.locator(`.sent.clip[data-ln="${n3}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(1800);
+    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(800);
+    const mineIt = win.locator('[data-testid="cmp-item"][title$=" · G2 — 누르면 이 파일로 새 클립"]').first();
+    ok(await mineIt.count() === 1, '「내 이미지」 목록에 이 대본이 쓴 그림(G2)이 있다');
+    await mineIt.click(); await win.waitForTimeout(1800);
     await win.keyboard.press('Escape'); await win.waitForTimeout(400);
     const gi = await win.evaluate(async () => { const q = await window.api.listQueue(); return q.dto.projects[0].cuts.map((c) => c.imagePath || null); });
-    ok(gi.length === 4 && gi[1] && gi[2] && gi[3] && gi[3] !== gi[1] && /media-1/.test(gi[3]), '🔑 앞(A)·새(N)·뒤(B) 모두 그림이 있고 B 는 A 의 복사본(출력 폴더 media-1 안의 새 파일) ' + JSON.stringify(gi.map((x) => x && x.split(/[\/]/).pop())));
+    ok(gi.length === 4 && gi[1] && gi[2] && gi[3] && gi[3] !== gi[1] && /media-1/.test(gi[3]) && /pick.png$/.test(gi[2]), '🔑 「내 이미지」에서 고른 그림이 새 그룹(N)에(출력 폴더 밖 원본은 그대로 가리킨다 — 첨부와 같다) · 뒤(B)는 A 의 복사본(media-1 안 새 파일) ' + JSON.stringify(gi.map((x) => x && x.split(/[\\/]/).pop())));
     ok(gi[3] && require('fs').existsSync(gi[3]), '뒤 그룹의 복사본 파일이 실제로 있다');
+    // 출력 폴더(media-1) 안의 그룹 그림을 고르면 사본 — 두 그룹이 한 파일을 쓰면 번호 정리가 옮긴다
+    cl = await clips();
+    const nLast = cl[cl.length - 1].n;
+    await hoverGap(nLast);
+    await win.locator(`.sent.clip[data-ln="${nLast}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
+    await win.locator('[data-testid="clip-add-image"]').click(); await win.waitForTimeout(800);
+    const inMedia = win.locator('[data-testid="cmp-item"][title*="' + gi[3].split(/[\\/]/).pop() + ' · G4"]').first();
+    ok(await inMedia.count() === 1, '「내 이미지」에 출력 폴더 안 그림(G4)도 있다');
+    await inMedia.click(); await win.waitForTimeout(1800);
+    await win.keyboard.press('Escape'); await win.waitForTimeout(400);
+    const gi2 = await win.evaluate(async () => { const q = await window.api.listQueue(); return q.dto.projects[0].cuts.map((c) => c.imagePath || null); });
+    ok(gi2.length === 5 && gi2[4] && /media-1/.test(gi2[4]) && gi2[4] !== gi2[3] && require('fs').existsSync(gi2[4]) && require('fs').existsSync(gi2[3]), '🔑 출력 폴더 안 그림을 고르면 사본을 만든다(두 그룹이 한 파일을 쓰지 않는다) ' + JSON.stringify(gi2.map((x) => x && x.split(/[\\/]/).pop())));
     await win.keyboard.press('Control+z'); await win.waitForTimeout(1200);
     await win.keyboard.press('Control+z'); await win.waitForTimeout(1200);
-    // 비디오 클립 — 같은 길(그룹 마지막 클립 뒤)
+    await win.keyboard.press('Control+z'); await win.waitForTimeout(1200);
+    // 비디오 클립 — 같은 창의 비디오 탭(그룹 마지막 클립 뒤)
     const vidFile = path.join(outDir, 'pick.mp4'); fs.writeFileSync(vidFile, Buffer.alloc(2048));
     await app.evaluate(({ dialog }, f) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] }); }, vidFile);
     cl = await clips();
     const lastN2 = cl[cl.length - 1].n;
     await hoverGap(lastN2);
     await win.locator(`.sent.clip[data-ln="${lastN2}"] [data-testid="clip-add"]`).click(); await win.waitForTimeout(300);
-    await win.locator('[data-testid="clip-add-video"]').click(); await win.waitForTimeout(1800);
+    await win.locator('[data-testid="clip-add-video"]').click(); await win.waitForTimeout(600);
+    ok(await win.locator('[data-testid="cmp-sub-video"].on').count() === 1, '「비디오 클립」 → 같은 창의 비디오 탭');
+    await win.locator('[data-testid="cmp-pc"]').click(); await win.waitForTimeout(1800);
     await win.keyboard.press('Escape'); await win.waitForTimeout(400);
     g = await groups();
     ok(g.length === 3 && g[2] === '새 클립입니다.', '비디오 클립: 마지막 클립 뒤에 새 그룹 ' + JSON.stringify(g));

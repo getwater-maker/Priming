@@ -92,6 +92,45 @@ function vsoundLabel(v) {
   return n.mode === 'video' ? `영상 소리만 ${n.vol}%` : `내레이션 ${n.nar}% + 영상 ${n.vol}%`;
 }
 
+// ✂ 비디오 시작점 변경(v1.0.63 · 로이 2026-11-18 · Vrew 「비디오 시작점 변경」) — 그룹 영상 파일에서 쓸 구간.
+//   look.vtrim = { in, out, d } (초 · d = 고를 때 영상 길이) — 없음 = 처음부터(지금까지의 동작).
+//   🔑 규칙 = 「영상이 [in, out] 구간짜리 파일인 것처럼」 — 빌더는 그 구간만 자른 사본을 만들고 그 뒤는 예전 그대로(길이 맞추기 · 소리 · 필터 · MP4).
+//   ① 칸·▶ 재생기·② 썸네일은 vtrimAt 으로 같은 자리를 찾는다. 영상이 바뀌어 길이(d)가 다르면 쓰지 않는다(엉뚱한 자리 방지).
+//   ⚠ 렌더러 번들에도 들어간다 — 순수 계산만.
+const VTRIM_MIN = 0.3;   // 이보다 짧은 구간은 고를 수 없다(초)
+const _r2 = (v) => Math.round(Number(v) * 100) / 100;
+function normVtrim(v) {
+  if (!v || typeof v !== 'object') return null;
+  const a = _r2(v.in), b = _r2(v.out), d = v.d != null ? _r2(v.d) : null;
+  if (!isFinite(a) || !isFinite(b) || a < 0 || b - a < VTRIM_MIN - 1e-9) return null;
+  if (d != null && (!isFinite(d) || d <= 0 || b > d + 0.05)) return null;
+  const o = { in: a, out: b }; if (d != null) o.d = d;
+  return o;
+}
+/** 실제로 쓸 구간 — 파일 길이(fileDur)를 알면 맞춰 자른다 · 처음부터 끝까지면 null(자를 것 없음) · 길이가 고를 때와 다르면 null */
+function vtrimSeg(v, fileDur) {
+  const n = normVtrim(v); if (!n) return null;
+  const fd = Number(fileDur);
+  if (fd > 0) {
+    if (n.d != null && Math.abs(fd - n.d) > 0.25) return null;   // 다른 영상(다시 만들었다) — 고른 자리가 맞지 않는다
+    const a = Math.min(n.in, Math.max(0, fd - VTRIM_MIN)), b = Math.min(n.out, fd);
+    if (b - a < VTRIM_MIN - 1e-9) return null;
+    if (a < 0.02 && b > fd - 0.05) return null;   // 전체 = 자를 것 없음
+    return { in: _r2(a), out: _r2(b) };
+  }
+  return (n.in < 0.02 && n.d != null && n.out > n.d - 0.05) ? null : { in: n.in, out: n.out };
+}
+/** 그룹 그림이 보이기 시작한 뒤 t초 → 영상 파일 안의 자리(초). 구간이 없으면 t % fileDur(지금까지와 같다) · once = 반복 없이 끝에서 멈춤 */
+function vtrimAt(v, fileDur, t, once) {
+  const fd = Number(fileDur) > 0 ? Number(fileDur) : 0;
+  const s = vtrimSeg(v, fd || undefined);
+  const a = s ? s.in : 0, b = s ? s.out : fd;
+  const L = b - a; const tt = Math.max(0, Number(t) || 0);
+  if (!(L > 0)) return tt;
+  return once && tt >= L ? Math.max(a, b - 0.05) : a + (tt % L);
+}
+const fmtVtrim = (v) => { const n = normVtrim(v); return n ? `${n.in.toFixed(1)}~${n.out.toFixed(1)}초` : ''; };
+
 /** 📐 ① 칸에서 옮기고 줄인 자리(캔버스 0..1 · 넘쳐도 된다) — 이상하면 null */
 function normBox(b) {
   if (!b || typeof b !== 'object') return null;
@@ -128,13 +167,15 @@ function normLook(l) {
   if (ks) out.kbSeg = ks;   // 없음(채널 설정대로)이면 필드를 두지 않는다(옛 작업본·옛 동작 그대로)
   const vs = normVsound(o.vsound);
   if (vs) out.vsound = vs;   // 🔊 영상 소리 선택(기본 = 필드 없음 = 내레이션만)
+  const vt = normVtrim(o.vtrim);
+  if (vt) out.vtrim = vt;   // ✂ 비디오 시작점(기본 = 필드 없음 = 처음부터)
   return out;
 }
 function isDefault(l) {
   const n = normLook(l);
-  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer && n.opacity == null && !n.crop && !n.vsound;
+  return n.fill === 'auto' && !n.flipH && !n.flipV && n.motion === 'auto' && !n.box && !n.kbSeg && !n.fx && !n.zoom && !n.rot && !n.bg && !n.filter && !n.trans && !n.layer && n.opacity == null && !n.crop && !n.vsound && !n.vtrim;
 }
-function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : '') + (normLook(l).opacity != null ? ` · 불투명도 ${normLook(l).opacity}%` : '') + (normLook(l).crop ? ' · 자르기' : '') + (normLook(l).vsound ? ` · 🔊 ${normLook(l).vsound.mode === 'tts' ? '내레이션만(채널 기본값 무시)' : vsoundLabel(normLook(l).vsound)}` : ''); }
+function describe(l) { return _describeBase(l) + CE.describeFx(normLook(l)) + (normLook(l).layer ? ` · 순서 ${normLook(l).layer > 0 ? '+' : ''}${normLook(l).layer}` : '') + (normLook(l).opacity != null ? ` · 불투명도 ${normLook(l).opacity}%` : '') + (normLook(l).crop ? ' · 자르기' : '') + (normLook(l).vsound ? ` · 🔊 ${normLook(l).vsound.mode === 'tts' ? '내레이션만(채널 기본값 무시)' : vsoundLabel(normLook(l).vsound)}` : '') + (normLook(l).vtrim ? ` · ✂ 영상 ${fmtVtrim(normLook(l).vtrim)}` : ''); }
 function _describeBase(l) {
   const n = normLook(l);
   const f = FILLS.find((x) => x.id === n.fill).label;
@@ -234,4 +275,4 @@ function ovBox(o, w, h, cW, cH) {
 /** 삽입 그림의 켄번스 종류(그룹 MOTIONS 의 in·out·lr·rl·bt·tb) — 이상하면 '' */
 const normOvMotion = (m) => (OV_MOTIONS.includes(m) ? m : '');
 
-module.exports = { VSOUND_MODES, VSOUND_DEFAULT_VOL, VSOUND_DEFAULT_NAR, normVsound, normChanVsound, effVsound, vsoundOf, vsoundLabel, OV_MOTIONS, normCrop, normOpacity, cropVis, cropInset, parseInset, ovBox, normOvMotion, FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };
+module.exports = { VTRIM_MIN, normVtrim, vtrimSeg, vtrimAt, fmtVtrim, VSOUND_MODES, VSOUND_DEFAULT_VOL, VSOUND_DEFAULT_NAR, normVsound, normChanVsound, effVsound, vsoundOf, vsoundLabel, OV_MOTIONS, normCrop, normOpacity, cropVis, cropInset, parseInset, ovBox, normOvMotion, FILLS, MOTIONS, FX_KINDS, FX_LEVELS, FX_GROUP, normFxChan, fxChanOn, normFxGroup, DISSOLVES, normDissolve, KB_SEGS, KB_SEGS_GROUP, normKbSeg, normKbSegGroup, normBox, normLook, isDefault, describe, aiNoticeForRange, AI_NOTICE_TEXT, aiNoticeTiming, aiNoticeOn };

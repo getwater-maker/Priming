@@ -118,6 +118,9 @@ contextBridge.exposeInMainWorld('api', {
   stockSearch: (args) => ipcRenderer.invoke('stock-search', args),
   stockDefaultQuery: (args) => ipcRenderer.invoke('stock-default-query', args),
   stockAttach: (args) => ipcRenderer.invoke('stock-attach', args),
+  stockFetch: (args) => ipcRenderer.invoke('stock-fetch', args),   // 🔎 받기만(＋ 클립 추가 창) → {ok, path, kind}
+  videoStrip: (args) => ipcRenderer.invoke('video-strip', args),   // ✂ 비디오 시작점 창 — 필름 띠·소리 파형
+  clipVoicePreview: (args) => ipcRenderer.invoke('clip-voice-preview', args),   // 🎧 AI 목소리 클립 미리 듣기(임시 합성)
   clearAsset: (args) => ipcRenderer.invoke('clear-asset', args),
   bulkAttach: (args) => ipcRenderer.invoke('bulk-attach', args),
   getPresetDetail: (name) => ipcRenderer.invoke('get-preset-detail', name),

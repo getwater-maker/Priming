@@ -127,6 +127,44 @@ async function fitVideo(src, srcSec, targetSec, { log = () => {}, dir = cacheDir
   return { path: out, mode: p.mode };
 }
 
+/**
+ * ✂ 비디오 시작점(v1.0.63 · look.vtrim) — 원본에서 [in, out] 구간만 자른 사본(캐시). 그 뒤는 이 사본을 원본처럼 쓴다(fitVideo · 소리 · 필터 · MP4).
+ *   소리: 원본에 소리가 있으면 같은 구간 소리를 그대로(영상 소리 선택 · keepAudio 가 뒤에서 판정) · 없으면 무음 트랙(컨테이너를 맞춘다).
+ *   프레임 정확도 = 다시 인코딩(-ss 를 -i 앞에 두되 libx264 로 다시 굽는다 — 키프레임 복사가 아니다).
+ *   실패하면 원본 그대로(예전 동작) — 던지지 않는다.
+ */
+function trimArgs(src, seg, out, hasAudio) {
+  const a = Number(seg.in), L = Number(seg.out) - a;
+  const ins = ['-ss', a.toFixed(3), '-i', src];
+  const sil = hasAudio ? [] : ['-f', 'lavfi', '-t', L.toFixed(3), '-i', 'anullsrc=r=48000:cl=stereo'];
+  return ['-hide_banner', '-loglevel', 'error', ...ins, ...sil, '-t', L.toFixed(3),
+    '-map', '0:v:0', '-map', hasAudio ? '0:a:0' : '1:a', '-vf', `fps=${FPS},format=yuv420p`,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', hasAudio ? '128k' : '64k', '-ar', '48000', '-ac', '2', '-movflags', '+faststart', '-y', out];
+}
+async function trimVideo(src, seg, { log = () => {}, dir = cacheDir(), label = '' } = {}) {
+  if (!seg || !(Number(seg.out) > Number(seg.in))) return { path: src, mode: 'none' };
+  let st;
+  try { st = fs.statSync(src); } catch (_) { return { path: src, mode: 'fail', error: '원본 영상이 없습니다' }; }
+  let has = false; try { has = await require('./media-utils').hasAudioStream(src); } catch (_) { has = false; }
+  const key = crypto.createHash('sha1').update(['trim', path.resolve(src), st.size, Math.round(st.mtimeMs), Number(seg.in).toFixed(2), Number(seg.out).toFixed(2), has ? 'a' : 's', FPS].join('|')).digest('hex').slice(0, 20);
+  const out = path.join(dir, `${key}_trim.mp4`);
+  const what = `${Number(seg.in).toFixed(2)}~${Number(seg.out).toFixed(2)}초`;
+  try { if (fs.statSync(out).size > 1000) { try { const n = new Date(); fs.utimesSync(out, n, n); } catch (_) {} log(`✂ ${label}영상 시작점 — ${what} 구간 (캐시)`); return { path: out, mode: 'trim', cached: true }; } } catch (_) {}
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+  const tmp = out.replace(/\.mp4$/, `.part-${process.pid}.mp4`);
+  const t0 = Date.now();
+  const r = await _run(_ffmpeg(), trimArgs(src, seg, tmp, has));
+  if (!r.ok) {
+    try { fs.rmSync(tmp, { force: true }); } catch (_) {}
+    log(`⚠ ${label}영상 시작점 구간을 자르지 못해 처음부터 씁니다: ${r.error}`);
+    return { path: src, mode: 'fail', error: r.error };
+  }
+  try { fs.renameSync(tmp, out); } catch (e) { return { path: src, mode: 'fail', error: e.message }; }
+  log(`✂ ${label}영상 시작점 — ${what} 구간만 씁니다${has ? '(그 구간 소리 포함)' : ''} (${((Date.now() - t0) / 1000).toFixed(1)}초)`);
+  return { path: out, mode: 'trim' };
+}
+
 /** 오래된 캐시 정리(기본 14일) — 앱 시작 때 부른다. */
 function pruneCache(days = 14, dir = cacheDir()) {
   let n = 0;
@@ -140,4 +178,4 @@ function pruneCache(days = 14, dir = cacheDir()) {
   return n;
 }
 
-module.exports = { SLOW_MAX, XFADE, FPS, plan, buildArgs, fitVideo, pruneCache, cacheDir };
+module.exports = { SLOW_MAX, XFADE, FPS, plan, buildArgs, fitVideo, trimArgs, trimVideo, pruneCache, cacheDir };

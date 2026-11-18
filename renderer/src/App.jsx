@@ -43,6 +43,8 @@ import Mp4Progress from './Mp4Progress.jsx';
 import MakeProgress from './MakeProgress.jsx';
 import YtProgress from './YtProgress.jsx';
 import StockDialog from './StockDialog.jsx';
+import VtrimModal from './VtrimModal.jsx';   // ✂ 비디오 시작점 변경(v1.0.63)
+import ClipMediaPick from './ClipMediaPick.jsx';   // 🖼🎬 이미지 • 비디오 클립 추가하기(v1.0.63)
 import BackupModal from './BackupModal.jsx';
 import AccountPage from './AccountPage.jsx';
 import CEff from '../../core/clip-effects.js';
@@ -2056,8 +2058,11 @@ export default function App() {
     return () => { stop = true; clearTimeout(timer); };
   }, [_mlKey]);
   // 🖼 그림 모양(채우기·반전·움직임) · 🏷 AI 고지 범위
+  // ✂ 비디오 시작점 변경 창 — ② 그룹 썸네일 메뉴 「[ ] 비디오 시작점 변경」(target = 그 그림이 보이는 시간)
+  const [vtrimDlg, setVtrimDlg] = useState(null);   // { sn, c, target }
+  function openVtrim(sn, c, target) { if (c && c.videoPath) setVtrimDlg({ sn, c, target }); }
   async function setGroupLook(shortsNum, groupNum, patch) {
-    try { const d = await api.setGroupLook({ shortsNum, groupNum, patch }); if (d) setDto(d); setStatus(patch && 'vsound' in patch ? `🔊 G${groupNum} 소리 설정을 바꿨습니다 (Ctrl+Z 되돌리기)` : `🖼 G${groupNum} 그림 모양을 바꿨습니다 (Ctrl+Z 되돌리기)`); }
+    try { const d = await api.setGroupLook({ shortsNum, groupNum, patch }); if (d) setDto(d); setStatus(patch && 'vtrim' in patch ? (patch.vtrim ? `✂ G${groupNum} 영상은 ${VLook.fmtVtrim(patch.vtrim)} 구간을 씁니다 (Ctrl+Z 되돌리기)` : `✂ G${groupNum} 영상을 처음부터 씁니다 (Ctrl+Z 되돌리기)`) : patch && 'vsound' in patch ? `🔊 G${groupNum} 소리 설정을 바꿨습니다 (Ctrl+Z 되돌리기)` : `🖼 G${groupNum} 그림 모양을 바꿨습니다 (Ctrl+Z 되돌리기)`); }
     catch (e) { logline('그림 모양 오류: ' + e.message); }
   }
   async function setAiRange(shortsNum, from, to, ask) {
@@ -2117,28 +2122,77 @@ export default function App() {
       else clipErr(r, '그룹 나누기');
     } catch (e) { logline('그룹 나누기 오류: ' + e.message); clipErr(null, '그룹 나누기'); }
   }
-  // ＋ 클립 추가(v0.7.72 · 브루) — 클립 사이 막대의 「클립 추가」 → 4가지 팝업. AI 목소리 클립 = 그 클립 **뒤**에 새 문장(자리표시 글) 하나 — 붙여넣기(paste-clips)와 같은 길이라
-  //   문장 한가운데면 문장이 줄에서 나뉘고 음성도 쉼에서 잘려 앞·뒤에 남는다 · 새 클립은 목소리가 비어 있다(글을 고치고 🎤). 나머지 셋은 준비 중.
-  const [clipAddMenu, setClipAddMenu] = useState(null);   // { sn, info, x, y }
-  function openClipAdd(sn, info, at) { setClipAddMenu({ sn, info, x: at.x, y: at.y }); }
-  async function addVoiceClip(kind) {
-    const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
-    const { sn, info } = m;
-    const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null;
-    const cut = pj && pj.cuts.find((x) => x.num === info.groupNum);
-    const sent = cut && (cut.sentences || [])[info.sentIdx];
-    const PL = linesMap.get(sn); const ls = (PL && PL.bySent.get(info.groupNum + ':' + info.sentIdx)) || [];
-    const after = ls.findIndex((l) => l.n === info.n);
-    if (!sent || after < 0) return;
-    const T = '새 클립입니다.';
+  // ＋ 클립 추가(v0.7.72 · 브루 → v1.0.63 Vrew 동선) — 클립 사이에 마우스 → 「＋ 클립 추가」 → **그 자리에 점선 패널**(카드 넷: AI 목소리 · 빈 · 이미지 · 비디오).
+  //   패널·입력 줄은 ② 칸 안(Cards → ClipAddInline)에 그려지고, 누른 것은 창 이벤트 'pm-clip-add' 로 여기에 온다(그룹 칸에 처리기를 줄줄이 넘기지 않으려고).
+  //   · AI 목소리 = 그 자리에 입력 줄(「텍스트를 입력하시면…」 · 🎧 미리 듣기 · 확인 ↵) → 확인하면 그 클립 **뒤**에 새 문장(paste-clips 와 같은 길) + 그 문장 음성
+  //   · 빈 클립 = 그 문장 뒤 5초 무음(clip-pad · s.padAfter — Vrew 「⏱ 1초」 다섯 칸) · 이미지·비디오 = 「이미지 • 비디오 클립 추가하기」 창(ClipMediaPick) → add-media-clip(file)
+  const [clipAdd, setClipAdd] = useState(null);   // { sn, n, info, stage:'menu'|'voice' }
+  const [clipMediaDlg, setClipMediaDlg] = useState(null);   // { sn, info, kind }
+  function openClipAdd(sn, info) { setClipAdd((cur) => (cur && cur.sn === sn && cur.n === info.n && cur.stage === 'menu' ? null : { sn, n: info.n, info, stage: 'menu' })); }
+  // 패널(카드 넷)이 열린 채 다른 곳을 누르면 닫는다 — 입력 줄(voice)은 ✕·Esc 로만(쓰던 글을 잃지 않게)
+  useEffect(() => {
+    if (!clipAdd) return undefined;
+    const md = (e) => { if (clipAdd.stage !== 'menu') return; const t = e.target; if (t && t.closest && (t.closest('.clip-add-panel') || t.closest('[data-testid="clip-add"]'))) return; setClipAdd(null); };
+    const kd = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) { setClipAdd(null); } };
+    document.addEventListener('mousedown', md, true); window.addEventListener('keydown', kd);
+    return () => { document.removeEventListener('mousedown', md, true); window.removeEventListener('keydown', kd); };
+  }, [clipAdd]);
+  const clipAddAt = (m) => {
+    const PL = linesMap.get(m.sn); const ls = (PL && PL.bySent.get(m.info.groupNum + ':' + m.info.sentIdx)) || [];
+    const after = ls.findIndex((l) => l.n === m.info.n);
+    return after < 0 ? null : { groupNum: m.info.groupNum, sentIdx: m.info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after, last: after === ls.length - 1 };
+  };
+  const sentOfInfo = (sn, info) => { const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === sn) : null; const cut = pj && pj.cuts.find((x) => x.num === info.groupNum); return { cut, sent: cut && (cut.sentences || [])[info.sentIdx] }; };
+  // 새 문장(편 전체 순번) → { groupNum, sentIdx }
+  const sentRefOf = (d, sn, gi) => { const pj = d && d.projects ? d.projects.find((x) => x.shortsNum === sn) : null; if (!pj) return null; let o = 0; for (const c of pj.cuts) { const k = (c.sentences || []).length; if (gi < o + k) return { groupNum: c.num, sentIdx: gi - o }; o += k; } return null; };
+  useEffect(() => {
+    const h = async (e) => {
+      const d = (e && e.detail) || {}; const m = clipAdd; if (!m) return;
+      if (d.act === 'close') { setClipAdd(null); return; }
+      if (d.act === 'voice') { setClipAdd({ ...m, stage: 'voice' }); return; }
+      if (d.act === 'empty') { setClipAdd(null); addBlankClip(m); return; }
+      if (d.act === 'image' || d.act === 'video') { setClipAdd(null); setClipMediaDlg({ sn: m.sn, info: m.info, kind: d.act }); return; }
+      if (d.act === 'voice-ok') { setClipAdd(null); addVoiceClipText(m, d.text); return; }
+      if (d.act === 'voice-pv') {
+        const { sent } = sentOfInfo(m.sn, m.info);
+        try {
+          const r = await api.clipVoicePreview({ shortsNum: m.sn, text: d.text, speaker: (sent && sent.speaker) || null, presetName: presetName || null, speed: ttsSpeed || null });
+          if (!r || !r.ok) setStatus('⚠ 미리 듣기: ' + ((r && r.error) || '음성을 만들지 못했습니다'));
+          if (d.done) d.done(r && r.ok ? { ...r, url: media(r.path, String(Date.now())) } : null);
+        } catch (er) { setStatus('⚠ 미리 듣기 오류: ' + er.message); if (d.done) d.done(null); }
+      }
+    };
+    window.addEventListener('pm-clip-add', h);
+    return () => window.removeEventListener('pm-clip-add', h);
+  });
+  // 🗣 AI 목소리 클립 — 쓴 글을 그 클립 뒤 새 문장으로 넣고(대본 .md 에도) 그 문장 음성을 만든다
+  async function addVoiceClipText(m, text) {
+    const at = clipAddAt(m); const { cut, sent } = sentOfInfo(m.sn, m.info);
+    if (!at || !sent) return;
+    const T = String(text || '').trim(); if (!T) return;
     try {
-      const r = await api.pasteClips({ shortsNum: sn, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after }, chunks: [{ text: T, parts: [T], audio: null, dur: null, speaker: sent.speaker || null, isIntro: !!cut.isIntro }] });
-      if (r && r.ok) {
-        setDto(r.dto); setCapSel(null);
-        setStatus(`＋ 클립 ${info.n} 뒤에 새 클립을 만들었습니다 — 글을 쓴 뒤 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
-        openNewClipEditor(sn, r.firstSentence);
-      } else clipErr(r, '클립 추가');
+      const r = await api.pasteClips({ shortsNum: m.sn, at, chunks: [{ text: T, parts: [T], audio: null, dur: null, speaker: sent.speaker || null, isIntro: !!(cut && cut.isIntro) }] });
+      if (!(r && r.ok)) { clipErr(r, '클립 추가'); return; }
+      setDto(r.dto); setCapSel(null);
+      const ref = sentRefOf(r.dto, m.sn, r.firstSentence);
+      setStatus(`🗣 클립 ${m.info.n} 뒤에 AI 목소리 클립을 넣었습니다 — 음성을 만드는 중… (Ctrl+Z 되돌리기)`);
+      if (!ref) return;
+      try {
+        const d2 = await api.ttsSentences({ shortsNum: m.sn, items: [ref], presetName: presetName || null, speed: ttsSpeed || null });
+        if (d2) setDto(d2);
+        setStatus(`🗣 AI 목소리 클립 — 음성까지 만들었습니다 (Ctrl+Z 되돌리기)`);
+      } catch (er) { logline('AI 목소리 클립 음성 오류: ' + er.message); setStatus('⚠ 클립은 넣었지만 음성을 만들지 못했습니다 — 그 클립을 골라 🎤 로 다시 만드세요 (' + er.message + ')'); }
     } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); }
+  }
+  // ⏱ 빈 클립 — 그 문장 음성 뒤에 5초 무음(Vrew 「⏱ [·· 1초]」 다섯 칸 · 길이는 그 빈 클립을 눌러 바꾼다)
+  async function addBlankClip(m) {
+    const at = clipAddAt(m); if (!at) return;
+    try {
+      const r = await api.clipPad({ shortsNum: m.sn, items: [{ groupNum: m.info.groupNum, sentIdx: m.info.sentIdx }], sec: SCards.PAD.def, mode: 'add' });
+      if (r && r.dto) setDto(r.dto);
+      if (r && r.ok) setStatus(`⏱ 빈 클립 ${r.sec}초${at.last ? '' : ' — 문장 한가운데라 그 문장 끝 뒤에'} 넣었습니다 · 눌러서 길이를 바꿉니다 (Ctrl+Z 되돌리기)`);
+      else setStatus('⚠ ' + ((r && r.error) || '빈 클립을 넣지 못했습니다'));
+    } catch (e) { setStatus('⚠ 빈 클립 오류: ' + e.message); }
   }
   // 새로 만든 클립의 글 편집칸을 열고 자리표시 글을 통째로 골라 둔다(바로 쓰면 바뀐다)
   function openNewClipEditor(sn, sentIdx) {
@@ -2165,22 +2219,21 @@ export default function App() {
     window.addEventListener('priming-card-clip', h);
     return () => window.removeEventListener('priming-card-clip', h);
   }, []);
-  // 🖼🎬 이미지 클립·비디오 클립 — 파일을 고르면 그 클립 뒤에 그 파일을 넣은 새 그룹(main add-media-clip)
-  async function addMediaClip(kind) {
-    const m = clipAddMenu; setClipAddMenu(null); if (!m) return;
-    const { sn, info } = m;
-    const PL = linesMap.get(sn); const ls = (PL && PL.bySent.get(info.groupNum + ':' + info.sentIdx)) || [];
-    const after = ls.findIndex((l) => l.n === info.n);
-    if (after < 0) return;
+  // 🖼🎬 이미지 클립·비디오 클립 — 「이미지 • 비디오 클립 추가하기」 창에서 고른 파일(file 없음 = PC 에서 불러오기 대화상자)을 넣은 새 그룹(main add-media-clip)
+  async function addMediaClipFile(m, kind, file) {
+    const at = clipAddAt(m); if (!at) return;
     try {
-      const r = await api.addMediaClip({ shortsNum: sn, kind, at: { groupNum: info.groupNum, sentIdx: info.sentIdx, lines: ls.map((l) => ({ from: l.from, to: l.to })), after } });
-      if (r && r.ok && r.canceled) { setStatus(`${kind === 'video' ? '비디오' : '이미지'} 클립 — 파일을 고르지 않아 취소했습니다`); return; }
+      const r = await api.addMediaClip({ shortsNum: m.sn, kind, file: file || undefined, at: { groupNum: at.groupNum, sentIdx: at.sentIdx, lines: at.lines, after: at.after } });
+      if (r && r.ok && r.canceled) { setStatus('이미지·비디오 클립 — 파일을 고르지 않아 취소했습니다'); return false; }
       if (r && r.ok) {
         setDto(r.dto); setCapSel(null);
-        setStatus(`${kind === 'video' ? '🎬' : '🖼'} 클립 ${info.n} 뒤에 ${kind === 'video' ? '비디오' : '이미지'} 클립 — 새 그룹 G${r.groupNum} 에 그 파일이 들어갔습니다 · 글을 고치고 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
-        openNewClipEditor(sn, r.firstSentence);
-      } else clipErr(r, '클립 추가');
-    } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); }
+        const k = r.kind || kind;
+        setStatus(`${k === 'video' ? '🎬' : '🖼'} 클립 ${m.info.n} 뒤에 ${k === 'video' ? '비디오' : '이미지'} 클립 — 새 그룹 G${r.groupNum} 에 그 파일이 들어갔습니다 · 글을 고치고 🎤 로 음성을 만드세요 (Ctrl+Z 되돌리기)`);
+        openNewClipEditor(m.sn, r.firstSentence);
+        return true;
+      }
+      clipErr(r, '클립 추가'); return false;
+    } catch (e) { logline('클립 추가 오류: ' + e.message); clipErr(null, '클립 추가'); return false; }
   }
   // ➕ 고른 그룹 바로 아래에 새 그룹(v0.7.71 · 브루 「씬 추가」) — 만든 뒤 새 문장을 바로 고치게 연다
   async function addGroupBelow(sn, groupNum) {
@@ -4792,6 +4845,12 @@ export default function App() {
         let last = 0; vv.addEventListener('timeupdate', () => { if (vv.currentTime + 0.3 < last) vv.muted = true; last = vv.currentTime; });
       }
     }
+    // ✂ 비디오 시작점(look.vtrim · v1.0.63) — 영상이 고른 구간 끝에 닿으면 구간 처음으로(반복 · 빌더처럼 반복부터는 영상 소리를 끈다)
+    for (const L of layers) if (L.videoPath && !L.ovId && L.look && L.look.vtrim) {
+      const vv = v.querySelector('.vlayer[data-num="' + L.num + '"] video'); if (!vv) continue;
+      vv.addEventListener('timeupdate', () => { const seg = VLook.vtrimSeg(L.look.vtrim, vv.duration); if (!seg) return; if (vv.currentTime >= seg.out - 0.04 || vv.currentTime < seg.in - 0.25) { try { vv.currentTime = seg.in; } catch (_) {} if (vv.currentTime >= seg.out - 0.04) vv.muted = true; } });
+      vv.addEventListener('ended', () => { const seg = VLook.vtrimSeg(L.look.vtrim, vv.duration); if (seg && !L.once) { try { vv.currentTime = seg.in; vv.muted = true; vv.play(); } catch (_) {} } });
+    }
     // 🎬 재생 중엔 영상을 **흐른 시간만큼 건너뛴 자리**에서 튼다 — 중간 클립부터 재생하거나 그룹이 바뀌어 화면을 다시 깔아도
     //   삽입 영상·이어 깐 영상이 처음으로 되돌아가지 않게(v0.5.59 · .vrew 는 원래 이어진다)
     if (playingRef.current && pr) {
@@ -4800,8 +4859,9 @@ export default function App() {
         const vv = v.querySelector('.vlayer[data-num="' + L.num + '"] video'); if (!vv) continue;
         const so = L.ovId ? L.ovFrom : (L.span ? L.span.from : ordOf(pr, L, 0));
         const t = secBetween(pr, so, ord) + (Number(extraSec) || 0);
-        if (!(t > 0.05)) continue;
-        const seek = () => { const d = vv.duration; if (!(d > 0)) return; if (L.once && t >= d) { try { vv.currentTime = Math.max(0, d - 0.05); vv.pause(); } catch (_) {} } else { try { vv.currentTime = t % d; } catch (_) {} if (t >= d && !L.ovId) vv.muted = true; /* 🔊 한 바퀴 지난 자리 — 영상 소리는 이미 끝났다 */ } };
+        const vt = !L.ovId && L.look && L.look.vtrim;   // ✂ 시작점 — 처음(t=0)이어도 구간 처음으로 옮긴다
+        if (!(t > 0.05) && !vt) continue;
+        const seek = () => { const d = vv.duration; if (!(d > 0)) return; const sg = vt && VLook.vtrimSeg(vt, d); if (sg) { try { vv.currentTime = VLook.vtrimAt(vt, d, t, L.once); } catch (_) {} if (t >= sg.out - sg.in) vv.muted = true; return; } if (L.once && t >= d) { try { vv.currentTime = Math.max(0, d - 0.05); vv.pause(); } catch (_) {} } else { try { vv.currentTime = t % d; } catch (_) {} if (t >= d && !L.ovId) vv.muted = true; /* 🔊 한 바퀴 지난 자리 — 영상 소리는 이미 끝났다 */ } };
         if (vv.readyState >= 1) seek(); else vv.addEventListener('loadedmetadata', seek, { once: true });
       }
     }
@@ -4857,7 +4917,7 @@ export default function App() {
       const vv = el.querySelector('video');
       if (vv) {
         try { vv.pause(); } catch (_) {}
-        const seek = () => { const d = vv.duration; if (!(d > 0)) return; try { vv.currentTime = (L.once && t >= d) ? Math.max(0, d - 0.05) : (t % d); } catch (_) {} };
+        const seek = () => { const d = vv.duration; if (!(d > 0)) return; try { vv.currentTime = (!L.ovId && L.look && L.look.vtrim) ? VLook.vtrimAt(L.look.vtrim, d, t, L.once) : (L.once && t >= d) ? Math.max(0, d - 0.05) : (t % d); } catch (_) {} };   // ✂ 시작점이면 그 구간 안의 자리
         if (vv.readyState >= 1) seek(); else vv.addEventListener('loadedmetadata', seek, { once: true });
       }
       const im = el.querySelector('img.kb');
@@ -7982,7 +8042,7 @@ export default function App() {
             onPlayGroup={playGroup} onRegen={runRegen} onEditImg={runEditImg} onUpscale={runUpscale} chanVsound={chanVsound}
             onAttach={attachAsset} onClear={clearAsset}
             onPreview={(kind, src, caption) => setPreview({ kind, src, caption: caption || '' })}
-            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} onRename={isLf ? renameGroup : null} onWordPlay={isLf ? playFromWord : null} onWordDelete={isLf ? deleteWords : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
+            onPlayFrom={playFrom} onGroupTts={runGroupTts} onGroupVid={runGroupVid} onShowPrompt={showPrompt} onSplit={splitGroup} onMerge={mergeGroup} onRange={isLf ? setVisualRange : null} onLook={isLf ? setGroupLook : null} aiNotice={isLf && aiNotice} onAiRange={isLf ? setAiRange : null} onAiPop={isLf ? setAiPop : null} aiRangeReq={aiRangeReq} onAiRangeDone={() => setAiRangeReq(null)} onInsMark={isLf ? openInsMenu : null} onInsRange={isLf ? insRange : null} onClipVoice={isLf ? openSpeakerVoice : null} onClipMove={isLf ? clipMove : null} onSplitAt={isLf ? splitGroupAt : null} onClipAdd={isLf ? openClipAdd : null} clipAdd={clipAdd} onVtrim={isLf ? openVtrim : null} onRename={isLf ? renameGroup : null} onWordPlay={isLf ? playFromWord : null} onWordDelete={isLf ? deleteWords : null} cardPause={isLf ? cardPause : 0} playing={playerOpen ? { key: playKey } : null}
             edit={{
               cur: sentEdit, ref: sentEditRef, busy: sentBusy,
               start: startSentEdit, commit: commitSentEdit, cancel: cancelSentEdit,
@@ -8114,14 +8174,16 @@ export default function App() {
           </div>
         </div>
       )}
-      {clipAddMenu && (<>
-        <div className="vr-menu-bg" onMouseDown={() => setClipAddMenu(null)} />
-        <div className="clip-add-pop" data-testid="clip-add-pop" style={{ left: Math.max(8, Math.min(clipAddMenu.x, window.innerWidth - 560)), top: Math.min(clipAddMenu.y, window.innerHeight - 130) }}>
-          <button type="button" data-testid="clip-add-voice" title="이 클립 뒤에 새 클립(글)을 만듭니다 — 글을 쓴 뒤 🎤 로 음성을 만드세요" onClick={() => addVoiceClip('voice')}><span className="ca-ic">🔊</span><span>AI 목소리 클립</span></button>
-          <button type="button" data-testid="clip-add-empty" title="이 클립 뒤에 빈 클립 — 자리표시 글이 통째로 골라진 채 열리니 바로 쓰면 바뀝니다(소리 없는 클립은 아직 없습니다 — 글이 있어야 음성·자막이 생깁니다)" onClick={() => addVoiceClip('empty')}><span className="ca-ic">▭</span><span>빈 클립</span></button>
-          <button type="button" data-testid="clip-add-image" title="이미지 파일을 고르면 이 클립 뒤에 그 그림을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('image')}><span className="ca-ic">🖼</span><span>이미지 클립</span></button>
-          <button type="button" data-testid="clip-add-video" title="비디오 파일을 고르면 이 클립 뒤에 그 영상을 넣은 새 그룹이 생깁니다" onClick={() => addMediaClip('video')}><span className="ca-ic">🎬</span><span>비디오 클립</span></button>
-        </div></>)}
+      {clipMediaDlg && <ClipMediaPick kind={clipMediaDlg.kind} sn={clipMediaDlg.sn}
+        mine={(() => { const pj = dto && dto.projects ? dto.projects.find((x) => x.shortsNum === clipMediaDlg.sn) : null; const out = []; const seen = new Set();
+          for (const c of ((pj && pj.cuts) || [])) for (const [f, v] of [[c.imagePath, c.imageVersion], [c.videoPath, c.videoVersion]]) if (f && !seen.has(f)) { seen.add(f); out.push({ path: f, version: v, name: f.split(/[\\/]/).pop(), from: 'G' + c.num }); }
+          for (const o of ((pj && pj.overlays) || [])) if (o.kind !== 'audio' && o.file && !seen.has(o.file)) { seen.add(o.file); out.push({ path: o.file, version: o.version, name: o.file.split(/[\\/]/).pop(), from: '삽입' }); }
+          return out; })()}
+        onClose={() => setClipMediaDlg(null)}
+        onPick={async (file, kind) => { const m = clipMediaDlg; const ok = await addMediaClipFile(m, kind, file); if (ok !== false) setClipMediaDlg(null); return ok; }}
+        onOpenKeys={() => { setClipMediaDlg(null); openSettings('keys'); }} />}
+      {vtrimDlg && <VtrimModal c={vtrimDlg.c} target={vtrimDlg.target} onClose={() => setVtrimDlg(null)}
+        onApply={(v) => { const d0 = vtrimDlg; setVtrimDlg(null); setGroupLook(d0.sn, d0.c.num, { vtrim: v }); }} />}
       {backupDlg && <BackupModal onClose={() => setBackupDlg(false)} onRestored={onBackupRestored} />}
       {stockDlg && <StockDialog target={stockDlg} onClose={() => setStockDlg(null)} onOpenKeys={() => { setStockDlg(null); openSettings('keys'); }}
         onAttached={(d, it) => { if (d) setDto(d); setStatus(`🔎 G${stockDlg.groupNum} 에 ${it.src === 'pexels' ? 'Pexels' : 'Pixabay'} ${it.kind === 'video' ? '영상' : '사진'}을 넣었습니다`); }} />}
@@ -9445,12 +9507,14 @@ function QueueList({ items, makeProg, stageRun, headerCh, onSelect, onRemove, on
       </div>
     </div>);
 }
-function Cards({ onEditImg, onUpscale, chanVsound, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause, onWordPlay, onWordDelete }) {
+function Cards({ onEditImg, onUpscale, chanVsound, onVtrim, clipAdd, dto, isLf, capCharsN, layout, detail, linesMap, cursor, onCursor, capBase, capSel, onPickCapLine, onPickCapChars, edit, onOverlay, onInsMark, playing, onTts, onImg, onVid, onImgVid, onTtsImg, onTtsImgVid, onBulk, onPlayGroup, onRegen, onAttach, onClear, onPreview, onPlayFrom, onGroupTts, onGroupVid, onShowPrompt, onSplit, onMerge, onRange, onLook, aiNotice, onAiRange, onAiPop, aiRangeReq, onAiRangeDone, onInsRange, onClipVoice, onClipMove, onSplitAt, onClipAdd, onRename, cardPause, onWordPlay, onWordDelete }) {
   // 🎬 Vrew 식 화면(클립 · 상세 보기 · 롱폼) — 오른쪽 = 클립마다 작은 그림 + 시각 · 왼쪽 = ➕ 삽입 범위 막대(v0.5.57)
   const vrewLay = layout === 'clips' && !!detail && !!isLf;
   // 🖼 그림 적용 범위 — 막대 끌기 상태와 썸네일 메뉴(Vrew 방식)
   const [vrDrag, setVrDrag] = useState(null);   // {shortsNum, groupNum, edge:'start'|'end', gs, ge, ord}
   const [vrMenu, setVrMenu] = useState(null);   // {shortsNum, c, gs, ge, n, x, y, sub}
+  // ✂ 비디오 시작점 창의 그룹 길이 — 그 그림이 보이는 문장들(gs~ge · 음성 + 막간 쉼 · .vrew 와 같은 sentSpan)
+  const vtrimTarget = (m) => { const p = dto && dto.projects.find((x) => x.shortsNum === m.shortsNum); if (!p) return 0; const all = []; for (const c0 of p.cuts) for (const se of (c0.sentences || [])) all.push(se); let t = 0; for (let k = m.gs; k <= m.ge; k++) { const se = all[k - 1]; if (se && se.dur > 0) t += sentSpan(se); } return t; };
   useEffect(() => { if (aiRangeReq) { setVrMenu(aiRangeReq); if (onAiRangeDone) onAiRangeDone(); } }, [aiRangeReq]);   // 🏷 AI 고지 팝업의 「문장 범위…」 → 이 칸의 범위 메뉴(v0.7.33)
   // 🎬 그룹(Vrew 의 씬) 접기 — 'sn:num'
   const [folded, setFolded] = useState(() => new Set());
@@ -9583,10 +9647,11 @@ function Cards({ onEditImg, onUpscale, chanVsound, dto, isLf, capCharsN, layout,
           const ed = ec && ec.shortsNum === sn && ec.groupNum === c.num ? JSON.stringify(ec) + (edit.busy ? 'B' : '') : '';
           const vr = vrDrag && vrDrag.shortsNum === sn ? (vrDrag.groupNum === c.num ? 'own' : '') + ':' + (() => { const r = vrRangeOf(vrDrag); return Math.max(gs, r.from) + '-' + Math.min(ge, r.to); })() : '';
           const play = playing && playing.key && (playing.key === 'group:' + sn + ':' + c.num || playing.key === 'from:' + sn + ':' + c.num) ? playing.key : '';
+          const ca = clipAdd && clipAdd.sn === sn && lineNs.includes(clipAdd.n) ? 'A' + rel(clipAdd.n) + clipAdd.stage : '';   // ＋ 클립 추가 패널·입력 줄이 이 그룹 안에 열렸다
           const ai = aiNotice ? ss.map((_, si) => (aiIn(pr0, gs + si) ? 'i' : '-') + (gs + si === aiFirst(pr0) ? 'F' : '')).join('') + '|' + JSON.stringify(pr0.aiNoticeRange || null) : '';   // 순번 대신 이 그룹 안 몇 번째 문장인가
           // 🔑 DTO 문장의 lines[].n 은 편 전체로 이어지는 번호 — 열쇠에서는 뺀다(한 줄만 줄어도 뒤 그룹 전체가 바뀐 것으로 보였다)
           const cj = JSON.stringify(c, (k, v) => (k === 'lines' && Array.isArray(v) ? v.map((x) => (x && x.text) || '') : v));
-          return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
+          return [cj, JSON.stringify([pr0.ttsVoiceText || '', pr0.spkVoiceText || null]), lines, sel, cur, ed, vr, ca, folded.has(sn + ':' + c.num) ? 'f' : '', play, ai, sig, fmtClipTime(sStart[gs] || 0, 1), Math.round(sStart[ge + 1] || 0), pr0.title, dto.mode,
             layout, detail ? 1 : 0, isLf ? 1 : 0, capCharsN, JSON.stringify(capBase || null), onRange ? 1 : 0, onInsMark ? 1 : 0, onAiRange ? 1 : 0, onMerge ? 1 : 0, onPickCapChars ? 1 : 0, onSplitAt ? 1 : 0, onClipAdd ? 1 : 0, onRename ? 1 : 0, onWordPlay ? 1 : 0, cardPause || 0].join('#');   // ⏸ 채널 막간 쉼(📜 카드 표시의 ⏸ N초)
         };
         return (
@@ -9885,6 +9950,8 @@ function Cards({ onEditImg, onUpscale, chanVsound, dto, isLf, capCharsN, layout,
                                   </div>
                                 )}
                               </div>
+                              {/* ＋ 클립 추가 — 그 자리에 펼친 점선 패널(카드 넷) 또는 AI 목소리 입력 줄(Vrew · v1.0.63) */}
+                              {clipAdd && clipAdd.sn === pr.shortsNum && clipAdd.n === l.n ? <ClipAddInline stage={clipAdd.stage} spk={s.speaker || '내레이션'} nextN={l.n + 1} /> : null}
                               {vrewLay && li === lines.length - 1 && s.pa > 0 && (() => {
                                 const full = Math.floor(s.pa + 1e-9), rest = Math.round((s.pa - full) * 10) / 10;
                                 const chips = Array.from({ length: Math.min(full, 30) }, (_, k) => '1초').concat(rest > 0 ? [rest + '초'] : []);
@@ -9990,7 +10057,7 @@ function Cards({ onEditImg, onUpscale, chanVsound, dto, isLf, capCharsN, layout,
         );
       })}
       {vrMenu && <VrMenu m={vrMenu} close={() => setVrMenu(null)} setSub={(v) => setVrMenu((cur) => (cur ? { ...cur, sub: v } : cur))}
-        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onEditImg={onEditImg} onUpscale={onUpscale} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay} chanVsound={chanVsound}
+        onPreview={onPreview} onAttach={onAttach} onClear={onClear} onRegen={onRegen} onEditImg={onEditImg} onUpscale={onUpscale} onGroupVid={onGroupVid} onRange={onRange} onLook={onLook} onAiRange={onAiRange} onOverlay={onOverlay} chanVsound={chanVsound} onVtrim={onVtrim && onLook ? (sn0, c0, m0) => onVtrim(sn0, c0, vtrimTarget(m0)) : null}
         grp={vrewLay ?{ onPlayGroup, onPlayFrom, onGroupTts, onShowPrompt, onMerge, onSplit, playing } : null} />}
       {vrDrag && <div className="vr-tip">🖼 G{vrDrag.groupNum} 그림 → 문장 {vrRangeOf(vrDrag).from}~{vrRangeOf(vrDrag).to} · 놓으면 적용 · Esc 취소</div>}
     </div>
@@ -10060,7 +10127,7 @@ function layersAtOrd(pr, ord, rg) {
     const r = c.span || { from: a, to: b };
     if (ord >= r.from && ord <= r.to) {
       const lk = c.look || null;
-      out.push({ rank: rk[ci], key: 'g' + c.num, video: !!c.videoPath, file: c.videoPath || c.imagePath, version: c.videoPath ? c.videoVersion : c.imageVersion, box: lk && lk.box ? lk.box : null, flipH: !!(lk && lk.flipH), flipV: !!(lk && lk.flipV), startOrd: r.from });
+      out.push({ rank: rk[ci], key: 'g' + c.num, vtrim: c.videoPath && lk && lk.vtrim ? lk.vtrim : null, video: !!c.videoPath, file: c.videoPath || c.imagePath, version: c.videoPath ? c.videoVersion : c.imageVersion, box: lk && lk.box ? lk.box : null, flipH: !!(lk && lk.flipH), flipV: !!(lk && lk.flipV), startOrd: r.from });
     }
   }
   out.sort((x, y) => x.rank - y.rank);
@@ -10092,6 +10159,68 @@ function FrameImg({ file, version, t, fit }) {
   return src ? <img ref={ref} src={src} alt="" data-testid="frame-img" style={fit ? { objectFit: fit } : undefined} /> : <span ref={ref} className="frame-wait" data-testid="frame-wait" />;
 }
 // 🖼 클립 오른쪽 작은 그림 — ① 칸처럼 그림들을 겹쳐 그린다(삽입 그림·영상은 제 자리 · 크기로). tAt(startOrd) = 그 그림이 흐른 시간
+// ＋ 클립 추가 패널(Vrew · v1.0.63) — 클립 사이 「＋ 클립 추가」를 누르면 그 자리에 펼쳐지는 점선 칸. 누른 것은 창 이벤트 'pm-clip-add' 로 App 에 간다.
+const CA_ICON = {
+  voice: <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="8" cy="8" r="3.4" fill="currentColor" /><path d="M2 19c0-3.3 2.7-5.6 6-5.6s6 2.3 6 5.6z" fill="currentColor" /><path d="M16.5 7.5a4 4 0 0 1 0 5M19 5.2a7.3 7.3 0 0 1 0 9.6" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" /></svg>,
+  empty: <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2.5" fill="currentColor" /></svg>,
+  image: <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2" fill="currentColor" /><path d="M5.5 17l4.5-5.5 3.2 3.8 2.3-2.6 3 4.3z" fill="var(--card)" /><circle cx="16" cy="8.6" r="1.6" fill="var(--card)" /></svg>,
+  video: <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="currentColor" /><path d="M10 8.5v7l6-3.5z" fill="var(--card)" /></svg>,
+};
+function ClipAddInline({ stage, spk, nextN }) {
+  const fire = (act, extra) => window.dispatchEvent(new CustomEvent('pm-clip-add', { detail: { act, ...(extra || {}) } }));
+  const stop = (ev) => ev.stopPropagation();
+  if (stage === 'voice') return <ClipVoiceAdd spk={spk} n={nextN} fire={fire} />;
+  return (
+    <div className="clip-add-panel" data-testid="clip-add-pop" onClick={stop} onMouseDown={stop} onDoubleClick={stop}>
+      <button type="button" data-testid="clip-add-voice" title="그 자리에 새 클립 — 글을 쓰면 AI 목소리가 읽습니다" onClick={() => fire('voice')}>{CA_ICON.voice}<span>AI 목소리 클립</span></button>
+      <button type="button" data-testid="clip-add-empty" title="그 문장 음성 뒤에 5초 빈 클립(무음 · 그림은 이어집니다) — 눌러서 길이를 바꿉니다" onClick={() => fire('empty')}>{CA_ICON.empty}<span>빈 클립</span></button>
+      <button type="button" data-testid="clip-add-image" title="내 이미지·무료 이미지·PC 파일에서 골라 그 그림을 넣은 새 클립" onClick={() => fire('image')}>{CA_ICON.image}<span>이미지 클립</span></button>
+      <button type="button" data-testid="clip-add-video" title="내 비디오·무료 비디오·PC 파일에서 골라 그 영상을 넣은 새 클립" onClick={() => fire('video')}>{CA_ICON.video}<span>비디오 클립</span></button>
+    </div>
+  );
+}
+// 🗣 AI 목소리 클립 입력 줄 — 「텍스트를 입력하시면 AI 목소리가 읽어드립니다」 · 🎧 미리 듣기(임시 합성) · 확인 ↵(그 자리에 넣고 음성을 만든다) · ✕
+function ClipVoiceAdd({ spk, n, fire }) {
+  const [t, setT] = useState('');
+  const [pv, setPv] = useState('');   // '' | 'busy' | 'play'
+  const audRef = useRef(null), inRef = useRef(null), genRef = useRef(0);
+  useEffect(() => {
+    const tm = setTimeout(() => { try { inRef.current.focus(); inRef.current.scrollIntoView({ block: 'center' }); } catch (_) {} }, 40);
+    return () => { clearTimeout(tm); genRef.current++; try { if (audRef.current) audRef.current.pause(); } catch (_) {} };
+  }, []);
+  const v = t.trim();
+  const ok = () => { if (v) fire('voice-ok', { text: v }); };
+  const preview = () => {
+    if (pv === 'play') { try { audRef.current.pause(); } catch (_) {} setPv(''); return; }
+    if (!v || pv === 'busy') return;
+    const my = ++genRef.current; setPv('busy');
+    fire('voice-pv', { text: v, done: (r) => {
+      if (my !== genRef.current) return;
+      if (!r || !r.url) { setPv(''); return; }
+      const a = new Audio(r.url); audRef.current = a; a.onended = () => setPv('');
+      a.play().then(() => setPv('play')).catch(() => setPv(''));
+    } });
+  };
+  const stop = (ev) => ev.stopPropagation();
+  return (
+    <div className="clip-voice-add" data-testid="clip-voice-add" onClick={stop} onMouseDown={stop} onDoubleClick={stop}>
+      <div className="cva-no">{n}</div>
+      <div className="cva-body">
+        <div className="cva-r1">
+          <span className="clip-spk narr">🗣 {spk}</span>
+          <input ref={inRef} data-testid="clip-voice-text" value={t} placeholder="텍스트를 입력하시면 AI 목소리가 읽어드립니다"
+            onChange={(e) => setT(e.target.value)}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') { e.preventDefault(); ok(); } else if (e.key === 'Escape') { e.preventDefault(); fire('close'); } }} />
+          <button type="button" className="cva-x" data-testid="clip-voice-x" title="닫기(Esc)" onClick={() => fire('close')}>✕</button>
+        </div>
+        <div className="cva-r2">
+          <button type="button" className="cva-pv" data-testid="clip-voice-pv" disabled={!v || pv === 'busy'} title="넣기 전에 이 글을 그 목소리로 들어 봅니다" onClick={preview}>🎧 {pv === 'busy' ? '만드는 중…' : pv === 'play' ? '멈춤' : '미리 듣기'}</button>
+          <button type="button" className="cva-ok" data-testid="clip-voice-ok" disabled={!v} onClick={ok}>확인 ↵</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function ClipThumb({ layers, tAt }) {
   return (
     <>
@@ -10101,7 +10230,7 @@ function ClipThumb({ layers, tAt }) {
         const fit = L.box ? 'fill' : (L.fit || null);
         return (
           <span key={L.key} className={'cl-layer' + (L.box ? ' bx' : '')} style={{ ...(st || {}), ...(flip || {}) }}>
-            {L.video ? <FrameImg file={L.file} version={L.version} t={tAt(L.startOrd)} fit={fit} /> : <img src={media(L.file, L.version)} alt="" style={fit ? { objectFit: fit } : undefined} />}
+            {L.video ? <FrameImg file={L.file} version={L.version} t={L.vtrim ? VLook.vtrimAt(L.vtrim, L.vtrim.d, tAt(L.startOrd)) : tAt(L.startOrd)} fit={fit} /> : <img src={media(L.file, L.version)} alt="" style={fit ? { objectFit: fit } : undefined} />}
           </span>
         );
       })}
@@ -10414,7 +10543,7 @@ function VsndMenu({ c, chan, onSet, tp }) {
 }
 
 // 🖼 썸네일 메뉴(Vrew 의 그림 메뉴) — 흩어져 있던 기능 + 채우기 · 반전 · 움직임 · 적용 범위 변경. kind 'ai' = AI 고지 꼬리표 메뉴
-function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onUpscale, onGroupVid, onRange, onLook, onAiRange, onOverlay, grp, chanVsound }) {
+function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEditImg, onUpscale, onGroupVid, onRange, onLook, onAiRange, onOverlay, onVtrim, grp, chanVsound }) {
   const sn = m.shortsNum;
   const go = (fn) => () => { close(); fn(); };
   const style = { left: Math.min(m.x, window.innerWidth - 260), top: Math.min(m.y, window.innerHeight - 320) };
@@ -10519,6 +10648,7 @@ function VrMenu({ m, close, setSub, onPreview, onAttach, onClear, onRegen, onEdi
         <button onClick={() => setSub('flip')}>⇋ 반전 <span className="vr-val">{lk.flipH || lk.flipV ? [lk.flipH ? '좌우' : '', lk.flipV ? '상하' : ''].filter(Boolean).join('·') : '없음'}</span> ›</button>
         {lk.box && <button onClick={look({ box: null })}>📐 자리·크기 원래대로</button>}
         {c.imagePath && !c.videoPath && <button onClick={() => setSub('motion')}>🎞 움직임 <span className="vr-val">{VLook.MOTIONS.find((x) => x.id === lk.motion).label.replace(/\(.*\)/, '')}{lk.kbSeg ? ` · ${lk.kbSeg === 'auto' ? '자동 구간' : lk.kbSeg === 'off' ? '한 번에' : lk.kbSeg + '구간'}` : ''}{lk.fx ? ` · 오버레이 ${lk.fx === 'off' ? '끔' : lk.fx}` : ''}</span> ›</button>}
+        {c.videoPath && onVtrim && <button data-testid="mn-vtrim" title="이 영상에서 쓸 구간(시작점·끝점)을 고릅니다 — 원본 영상은 그대로입니다(Vrew 「비디오 시작점 변경」)" onClick={go(() => onVtrim(sn, c, m))}><span className="vr-brk">[ ]</span> 비디오 시작점 변경{lk.vtrim ? <span className="vr-val">{VLook.fmtVtrim(lk.vtrim)}</span> : null}</button>}
         <button data-testid="mn-vsnd" title="이 그룹에서 내레이션(TTS)과 영상 자체의 소리를 어떻게 낼지 — 영상 소리를 쓰면 내레이션을 줄이거나 끈다" onClick={() => setSub('vsnd')}>🔊 볼륨 <span className="vr-val">{VLook.vsoundLabel(VLook.effVsound(c, chanVsound))}{!lk.vsound ? ' (채널)' : ''}</span> ›</button>
         <div className="vr-sep" />
       </>}

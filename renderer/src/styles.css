@@ -1602,6 +1602,87 @@ body.clip-dragging .sent.clip .clip-no{cursor:grabbing}
 .clip-add-pop button:hover:not(.soon){background:var(--bg-145063);border-color:var(--sky)}
 .clip-add-pop button.soon{opacity:.5}
 .clip-add-pop .ca-ic{font-size:20px;line-height:1}
+/* ＋ 클립 추가 — 그 자리에 펼친 점선 패널(Vrew · v1.0.63) · AI 목소리 입력 줄 */
+.clip-add-panel{display:flex;justify-content:center;gap:10px;margin:2px 0 10px 44px;padding:14px;border:1px dashed var(--sky);border-radius:var(--r-lg);background:color-mix(in srgb,var(--sky) 9%,var(--card))}
+.clip-add-panel button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;flex:1 1 0;min-width:0;max-width:150px;white-space:nowrap;height:80px;min-height:0;background:transparent;border:1px solid color-mix(in srgb,var(--sky) 35%,var(--line));border-radius:var(--r-lg);color:var(--strong);font-size:var(--fs-md);font-weight:600;cursor:pointer}
+.clip-add-panel button svg{color:var(--sky)}
+.clip-add-panel button:hover{background:color-mix(in srgb,var(--sky) 18%,var(--card));border-color:var(--sky)}
+.sent.clip .clip-gap .cg-split{border-radius:50%;width:26px;height:22px;padding:0;justify-content:center;background:var(--paper-3);border-color:var(--line-2);color:var(--base)}
+.sent.clip .clip-gap .cg-split:hover{width:auto;padding:2px 10px;border-radius:14px}
+.clip-voice-add{display:flex;margin:2px 0 10px 0;border:1px solid var(--line-2);border-radius:var(--r-lg);background:var(--card);overflow:hidden}
+.clip-voice-add .cva-no{width:44px;flex:none;display:flex;justify-content:center;padding-top:12px;font-weight:700;color:var(--strong);border-right:1px solid var(--line)}
+.clip-voice-add .cva-body{flex:1;min-width:0}
+.clip-voice-add .cva-r1{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.clip-voice-add .cva-r1 input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--strong);font-size:var(--fs-lg);padding:6px 4px}
+.clip-voice-add .cva-x{min-height:0;padding:2px 8px;background:var(--paper-3);border:1px solid var(--line-2);border-radius:var(--r-sm);color:var(--base)}
+.clip-voice-add .cva-r2{display:flex;justify-content:space-between;align-items:center;padding:6px 10px}
+.clip-voice-add .cva-pv{background:transparent;border:0;color:var(--muted);min-height:0;padding:4px 6px}
+.clip-voice-add .cva-pv:not(:disabled):hover{color:var(--sky)}
+.clip-voice-add .cva-ok{min-height:0;padding:4px 14px;background:var(--paper-3);border:1px solid var(--line-2);border-radius:var(--r-md);color:var(--strong)}
+.clip-voice-add .cva-ok:not(:disabled){background:var(--sky);border-color:var(--sky);color:var(--fg-ffffff)}
+/* 🖼🎬 이미지 • 비디오 클립 추가하기(v1.0.63) */
+.cmp-card{background:var(--card);border-radius:14px;width:860px;max-width:94vw;height:min(700px,90vh);display:flex;flex-direction:column;padding:22px 26px;gap:12px;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.cmp-h{display:flex;align-items:center;justify-content:space-between;font-size:18px;color:var(--strong)}
+.cmp-x{background:transparent;border:0;font-size:20px;color:var(--base);min-height:0;padding:2px 6px}
+.cmp-top{display:inline-flex;align-self:flex-start;gap:4px;padding:4px;background:var(--paper-3);border-radius:var(--r-lg)}
+.cmp-top button{background:transparent;border:0;min-height:0;padding:8px 16px;border-radius:var(--r-md);color:var(--muted);font-weight:600}
+.cmp-top button.on{background:var(--card);color:var(--strong)}
+.cmp-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cmp-sub{display:flex;gap:14px}
+.cmp-sub button,.cmp-sub2 button{background:transparent;border:0;min-height:0;padding:4px 0;color:var(--muted);font-size:var(--fs-lg);border-bottom:2px solid transparent;border-radius:0}
+.cmp-sub button.on{color:var(--strong);font-weight:700;border-bottom-color:var(--strong)}
+.cmp-sub2{display:flex;gap:6px}
+.cmp-sub2 button{padding:6px 12px;border:0;border-radius:var(--r-md)}
+.cmp-sub2 button.on{background:var(--paper-3);color:var(--strong);font-weight:700}
+.cmp-pc{position:relative;display:inline-flex}
+.cmp-pc button{min-height:0;background:var(--sky);border:0;color:var(--fg-ffffff);font-weight:600}
+.cmp-pc-main{padding:9px 14px;border-radius:var(--r-md) 0 0 var(--r-md)}
+.cmp-pc-more{padding:9px 10px;border-radius:0 var(--r-md) var(--r-md) 0;border-left:1px solid color-mix(in srgb,var(--fg-ffffff) 35%,transparent)!important}
+.cmp-pc-menu{position:absolute;right:0;top:100%;margin-top:4px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-md);z-index:3;min-width:150px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.cmp-pc-menu button{background:transparent;color:var(--strong);text-align:left;padding:8px 12px;border-radius:0}
+.cmp-pc-menu button:hover{background:var(--paper-3)}
+.cmp-search{display:flex;gap:8px}
+.cmp-search input{flex:1}
+.cmp-grid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px 14px;align-content:start;padding:4px 2px}
+.cmp-it{position:relative;height:96px;padding:0;min-height:0;background:transparent;border:2px solid transparent;border-radius:var(--r-md);overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.cmp-it:hover{border-color:var(--sky)}
+.cmp-it img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.cmp-it .cmp-probe{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.cmp-it .cmp-wait{width:100%;height:100%;background:var(--paper-3)}
+.cmp-dur{position:absolute;left:6px;bottom:4px;background:rgba(0,0,0,.6);color:var(--fg-ffffff);font-size:var(--fs-xs);padding:1px 5px;border-radius:4px}
+.cmp-star{position:absolute;right:6px;top:4px;color:rgba(255,255,255,.55);font-size:15px;text-shadow:0 1px 2px rgba(0,0,0,.6);display:none}
+.cmp-it:hover .cmp-star,.cmp-star.on{display:block}
+.cmp-star.on{color:var(--gold)}
+.cmp-empty{grid-column:1/-1;text-align:center;padding:30px}
+/* ✂ 비디오 시작점 변경(v1.0.63) */
+.vtrim-card{background:var(--card);border-radius:14px;width:1300px;max-width:95vw;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.vtrim-h{display:flex;align-items:center;justify-content:space-between;padding:16px 22px;font-size:18px;color:var(--strong)}
+.vtrim-x{background:transparent;border:0;font-size:20px;color:var(--base);min-height:0;padding:2px 6px}
+.vtrim-stage{display:flex;justify-content:center;background:var(--card);padding:0 22px}
+.vtrim-stage video{height:min(360px,40vh);max-width:100%;background:var(--bg-000000)}
+.vtrim-tl{padding:16px 22px 6px}
+.vtrim-strips{position:relative;cursor:pointer;user-select:none}
+.vtrim-film{height:80px;border-radius:var(--r-md);background-color:var(--paper-3);background-size:100% 100%;background-repeat:no-repeat}
+.vtrim-wave{display:block;width:100%;height:44px;margin-top:4px;border-radius:var(--r-sm);background:color-mix(in srgb,var(--paper-3) 70%,transparent)}
+.vtrim-dim{position:absolute;top:0;bottom:0;background:rgba(0,0,0,.5);pointer-events:none;border-radius:var(--r-sm)}
+.vtrim-box{position:absolute;top:-3px;bottom:-3px;border:3px solid var(--sky);border-radius:var(--r-lg);cursor:grab;box-sizing:border-box}
+.vtrim-box:active{cursor:grabbing}
+.vtrim-h-l,.vtrim-h-r{position:absolute;top:0;bottom:0;width:12px;cursor:ew-resize}
+.vtrim-h-l{left:-7px}
+.vtrim-h-r{right:-7px}
+.vtrim-len{position:absolute;right:-3px;top:-3px;background:var(--sky);color:var(--fg-ffffff);font-size:var(--fs-sm);font-weight:700;padding:2px 6px;border-radius:0 var(--r-md) 0 var(--r-md)}
+.vtrim-head{position:absolute;top:-10px;bottom:-4px;width:3px;margin-left:-1.5px;background:var(--warn);pointer-events:none}
+.vtrim-head::before{content:'';position:absolute;left:-5px;top:-2px;border:6.5px solid transparent;border-top:8px solid var(--warn)}
+.vtrim-marks{position:relative;height:44px;font-size:var(--fs-sm);color:var(--sky)}
+.vtrim-marks span{position:absolute;top:4px;transform:translateX(0)}
+.vtrim-marks span.r{transform:translateX(-100%)}
+.vtrim-marks .vtrim-time{top:16px;transform:translateX(-50%);background:var(--paper-3);color:var(--strong);padding:4px 10px;border-radius:var(--r-md);white-space:nowrap}
+.vtrim-note{padding:0 0 4px}
+.vtrim-err{padding:20px 22px;color:var(--danger)}
+.vtrim-foot{position:relative;display:flex;justify-content:center;align-items:center;padding:14px 22px;background:var(--paper-3);border-top:1px solid var(--line)}
+.vtrim-play{width:40px;height:40px;min-height:0;border-radius:50%;padding:0;background:var(--card);border:1px solid var(--line-2);color:var(--strong);font-size:15px}
+.vtrim-act{position:absolute;right:22px;display:flex;gap:8px}
+.vtrim-act button{min-height:0;padding:7px 14px}
 /* 그룹 칸 도구 단추 — 이모지 첫 줄 · 글자 다음 줄(v0.7.71) */
 .pane-groups .pg-tools .pg-act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 2px;line-height:1.15;white-space:nowrap;min-width:0}
 .pane-groups .pg-act .pg-ic{font-size:15px;line-height:1.1}

@@ -4719,7 +4719,7 @@ async function runKieVideos(pr, mediaDir, onlyNums, engine) {
     if (_wantSound) log(`  🔊 G${g.num} 영상 소리 — ${_sk === 'flag' ? '소리를 켜고 만듭니다(요금이 더 들 수 있음)' : _sk === 'always' ? '이 모델은 늘 소리가 나옵니다' : '⚠ 이 모델은 소리 켜기를 확인하지 못했습니다(소리가 없으면 내레이션을 그대로 씁니다)'}`);
     log(`  · G${g.num} → ${m.label} (${durationSec}초${_wantSound ? ' · 소리' : ''})…`);
     const r = await KA.generateVideoToFile({ model: m, imagePath: g.imagePath, prompt, aspect: pr.aspect || '16:9', durationSec, outputPath: out, abortSignal: () => S.abort || !!stop, logger: log, sound: _wantSound });
-    if (r.ok) { g.videoPath = r.path; g.videoStatus = 'done'; made++; log(`  ✓ G${g.num} 완료`); }
+    if (r.ok) { g.videoPath = r.path; g.videoStatus = 'done'; _dropVtrim(g); made++; log(`  ✓ G${g.num} 완료`); }
     else {
       g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패: ${r.error}`);
       if (r.fatal && !stop) { stop = r.error; log(`⏹ ${r.fatal} — 남은 영상은 만들지 않고 멈춥니다(이미지로 진행)`); }
@@ -4801,7 +4801,7 @@ async function runComfyVideos(pr, mediaDir, onlyNums, workflowPath) {
         g.videoPath = null; g.videoStatus = 'fail';
         blanks.push(g);
         log(`  ⬛ G${g.num} 이상 영상(검정·노이즈) 감지 (${_dur(_el)}) — 폐기 후 재생성 대기`);
-      } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; vidTimes.push(_el); log(`  ✓ G${g.num} 완료 (${_dur(_el)})`); }
+      } else { g.videoPath = r.videoPath; g.videoStatus = 'done'; _dropVtrim(g); vidTimes.push(_el); log(`  ✓ G${g.num} 완료 (${_dur(_el)})`); }
     } else {
       g.videoStatus = 'fail'; log(`  ✗ G${g.num} 실패 (${_dur(_el)}): ${r.error}`);
       if (/429|too many|concurren|rate.?limit|동시/i.test(String(r.error || ''))) degraded = true;
@@ -5694,7 +5694,7 @@ ipcMain.handle('attach-asset', async (_e, args = {}) => {
   // 🔑 「사람이 직접 넣은 것」으로 표시 — sweepBadVisuals 가 검정·노이즈 판정에서 제외한다(_userAttached).
   //   ⚠ 이 경로는 파일을 미디어 폴더로 **복사하지 않고 원본을 가리킨다** — 지우면 사용자 원본이 사라진다.
   if (['.mp4', '.mov', '.webm', '.m4v'].includes(ext)) {
-    g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp);
+    g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp); _dropVtrim(g);
     log(`첨부(영상) ${pr.title} G${groupNum}: ${path.basename(fp)}`);
   } else {
     g.imagePath = fp; g.imageStatus = 'done'; g._userImage = _visKey(fp);
@@ -5982,13 +5982,8 @@ async function _downloadTo(url, dest) {
     await fs.promises.writeFile(tmp, buf); await fs.promises.rename(tmp, dest);
   } finally { clearTimeout(t); }
 }
-ipcMain.handle('stock-attach', async (_e, { shortsNum, groupNum, item } = {}) => {
-  if (!S.parsed || !S.outRoot) throw new Error('대본을 먼저 여세요.');
-  const it = item || {};
-  if (!/^https:\/\//.test(String(it.dl || '')) || !STOCK_IDS.includes(it.src)) throw new Error('받을 주소가 이상합니다');
-  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
-  const g = pr && pr.groups.find((x) => x.num === groupNum);
-  if (!g) throw new Error('그룹을 찾지 못했습니다');
+// 🔎 고른 스톡을 받아(사진은 화면 비율로 가운데 자르기) 파일 경로를 돌려준다 — stock-attach(그룹에 넣기)·stock-fetch(✂ 클립 추가 창)가 같이 쓴다
+async function _stockFetch(pr, it) {
   const FS = require('./core/free-stock');
   const dir = path.join(S.outRoot, '_stock');
   await P.retryFs(() => fs.mkdirSync(dir, { recursive: true }), '스톡 폴더');
@@ -6009,9 +6004,20 @@ ipcMain.handle('stock-attach', async (_e, { shortsNum, groupNum, item } = {}) =>
     }
     if (fs.existsSync(out)) fp = out;
   }
+  return fp;
+}
+ipcMain.handle('stock-attach', async (_e, { shortsNum, groupNum, item } = {}) => {
+  if (!S.parsed || !S.outRoot) throw new Error('대본을 먼저 여세요.');
+  const it = item || {};
+  if (!/^https:\/\//.test(String(it.dl || '')) || !STOCK_IDS.includes(it.src)) throw new Error('받을 주소가 이상합니다');
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum);
+  const g = pr && pr.groups.find((x) => x.num === groupNum);
+  if (!g) throw new Error('그룹을 찾지 못했습니다');
+  const fp = await _stockFetch(pr, it);
+  const FS = require('./core/free-stock');
   undoPush('스톡 첨부');
   _softenCoverOf(pr, g);
-  if (it.kind === 'video') { g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp); }
+  if (it.kind === 'video') { g.videoPath = fp; g.videoStatus = 'done'; g.videoCleared = false; g._userVideo = _visKey(fp); _dropVtrim(g); }
   else { g.imagePath = fp; g.imageStatus = 'done'; g.imageCleared = false; g._userImage = _visKey(fp); }
   try {   // 출처 기록(같은 줄은 한 번만)
     const cf = path.join(S.outRoot, '스톡_출처.txt'); const line = FS.creditLine(it, `G${groupNum}`);
@@ -6023,6 +6029,20 @@ ipcMain.handle('stock-attach', async (_e, { shortsNum, groupNum, item } = {}) =>
   return P.toDTO(S.parsed);
 });
 
+// 🔎 스톡 받기만(v1.0.63 · ＋ 클립 추가 ▸ 이미지·비디오 클립 창의 「무료 이미지·비디오」) — 받은 파일 경로를 돌려준다(넣기는 add-media-clip 이 file 로)
+ipcMain.handle('stock-fetch', async (_e, { shortsNum, item } = {}) => {
+  if (!S.parsed || !S.outRoot) throw new Error('대본을 먼저 여세요.');
+  const it = item || {};
+  if (!/^https:\/\//.test(String(it.dl || '')) || !STOCK_IDS.includes(it.src)) throw new Error('받을 주소가 이상합니다');
+  const pr = S.parsed.projects.find((p) => p.shortsNum === shortsNum) || S.parsed.projects[0];
+  const fp = await _stockFetch(pr, it);
+  try {
+    const cf = path.join(S.outRoot, '스톡_출처.txt'); const line = require('./core/free-stock').creditLine(it, '클립 추가');
+    const cur = fs.existsSync(cf) ? fs.readFileSync(cf, 'utf8') : '';
+    if (!cur.includes(line)) fs.appendFileSync(cf, (cur ? '' : '무료 스톡 출처 — 상업적 이용 가능 · 출처 표기 권장(설명란에 옮겨 적기)\n') + line + '\n', 'utf8');
+  } catch (e) { log('⚠ 스톡 출처 기록 실패: ' + e.message); }
+  return { ok: true, path: fp, kind: it.kind === 'video' ? 'video' : 'image' };
+});
 // 그룹 첨부 자산 삭제 (이미지/비디오 비우기)
 ipcMain.handle('clear-asset', (_e, args = {}) => {
   if (!S.parsed) return null;
@@ -10086,6 +10106,33 @@ ipcMain.handle('media-has-audio', async (_e, p) => {
   if (_hasAudMemo.size > 2000) _hasAudMemo.clear();
   _hasAudMemo.set(key, v); return v;
 });
+// ✂ 비디오 시작점 변경 창의 필름 띠·소리 파형(v1.0.63 · core/video-strip · 읽기만 · 결과는 임시 폴더 캐시)
+ipcMain.handle('video-strip', async (_e, args = {}) => {
+  const f = args && args.file;
+  if (!f || !fs.existsSync(f)) return { ok: false, error: '영상 파일을 찾을 수 없습니다' };
+  try { return await require('./core/video-strip').makeStrip(f); } catch (e) { return { ok: false, error: e.message }; }
+});
+// 🎧 AI 목소리 클립의 「미리 듣기」(v1.0.63 · Vrew) — 아직 클립으로 넣지 않은 글을 그 대본 목소리로 임시 폴더에 합성한다.
+//   같은 TTS 캐시를 쓰므로 「확인」 뒤 실제 클립 음성은 다시 합성하지 않고 캐시에서 나온다 · 대본·작업본은 바꾸지 않는다.
+ipcMain.handle('clip-voice-preview', (_e, args = {}) => enqueueTtsJob('미리 듣기', async () => {
+  const text = String(args.text || '').replace(/\s+/g, ' ').trim();
+  if (!text) return { ok: false, error: '글을 먼저 쓰세요' };
+  if (text.length > 400) return { ok: false, error: '미리 듣기는 400자까지입니다' };
+  { const _b = gpuBusyReason(); if (_b) return { ok: false, error: `${_b} 중에는 미리 들을 수 없습니다` }; }
+  const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };
+  const preset = scriptVoicePreset(resolvePreset(args.presetName || null), c.pr);
+  if (!preset) return { ok: false, error: '프리셋을 찾을 수 없습니다' };
+  const { mgr, ok } = await P.makeTtsManager(log, preset);
+  if (!ok) return { ok: false, error: `TTS 엔진 '${TtsEngines.resolveEngine(preset)}' 미가동 (서버 또는 API 키 확인)` };
+  const sp = (args.speed && Number(args.speed) > 0) ? Number(args.speed) : 1.0;
+  const fake = { id: '__clip_preview', num: 'preview_' + Date.now().toString(36), text, speaker: args.speaker || null, isIntro: false };
+  const dir = path.join(os.tmpdir(), 'priming-voice-preview');
+  resetWorkAbort();
+  try { await P.fillTtsList([fake], preset, mgr, dir, log, () => S.abort, sp, '미리 듣기', null, false); }
+  finally { try { await mgr.stop(); } catch {} }
+  if (!fake.ttsAudioPath || !fs.existsSync(fake.ttsAudioPath)) return { ok: false, error: '음성을 만들지 못했습니다' };
+  return { ok: true, path: fake.ttsAudioPath, dur: fake.ttsDurationSec || null };
+}));
 // ⬆ 그룹 하나 업스케일(v1.0.61 · 로이 2026-11-18 · ② 그룹 메뉴 「⬆ 업스케일」) — 영상이 있으면 영상(core/upscaler.upscaleVideo · 소리 그대로),
 //   없으면 그림(upscaleImage · Real-ESRGAN 2배). 새 파일(영상 `NN_1080.mp4` · 그림 `NN_up.png`)로 쓰고 경로만 바꾼다 — ⛔ 원본을 지우지 않는다(Ctrl+Z = 원본으로).
 //   이미 목표 해상도(캔버스) 이상이면 하지 않고 알린다 · 레인 'upscale'(자동 업스케일과 겹치지 않게).
@@ -10909,6 +10956,12 @@ ipcMain.handle('set-caption-breaks', async (_e, args = {}) => {
 });
 
 // 🖼 그룹 그림 모양 — 채우기(auto·cover·contain) · 반전(좌우·상하) · 움직임(켄번스). 그림 메뉴에서 바꾼다(Vrew 「채우기·반전·애니메이션」).
+// ✂ 영상이 새것으로 바뀌면 옛 시작점(look.vtrim)은 버린다 — 다른 영상의 자리를 가리키게 되므로(v1.0.63 · 업스케일 사본은 같은 영상이라 둔다)
+function _dropVtrim(g) {
+  if (!g || !g.look || !g.look.vtrim) return;
+  const VL = require('./core/visual-look'); const l = { ...g.look }; delete l.vtrim;
+  g.look = VL.isDefault(l) ? undefined : VL.normLook(l);
+}
 ipcMain.handle('set-group-look', (_e, args = {}) => {
   if (!S.parsed || S.parsed.kind === 'book') throw new Error('대본을 먼저 여세요.');
   const pr = S.parsed.projects.find((x) => x.shortsNum === args.shortsNum);
@@ -12669,7 +12722,8 @@ ipcMain.handle('card-clip-make', async (_e, args = {}) => {
 //   파일은 복사하지 않고 원본을 가리킨다(그림 첨부와 같다 — 지우지 않는다). 대본(.md)·그룹·음성 모두 되돌리기 한 번(UNDO.batch).
 const NEW_CLIP_TEXT = '새 클립입니다.';
 ipcMain.handle('add-media-clip', async (_e, args = {}) => {
-  const kind = args.kind === 'video' ? 'video' : 'image';
+  let kind = args.kind === 'video' ? 'video' : 'image';
+  const anyKind = args.kind === 'any';   // 「이미지 • 비디오 클립 추가하기」 창의 전체 탭 — 대화상자에 둘 다 · 종류는 확장자로
   const c0 = _clipCtx(args.shortsNum); if (c0.error) return { ok: false, error: c0.error };
   const j0 = _clipSents(c0.pr, [args.at]);
   if (!j0 || !j0.length) return { ok: false, error: '클립을 찾을 수 없습니다 — 다시 골라 주세요.' };
@@ -12678,12 +12732,13 @@ ipcMain.handle('add-media-clip', async (_e, args = {}) => {
     let defaultPath; try { const d = shortsDirs(S.outRoot, args.shortsNum); if (d && d.media) { fs.mkdirSync(d.media, { recursive: true }); defaultPath = d.media; } } catch {}
     const r = await dialog.showOpenDialog(win, {
       defaultPath, properties: ['openFile'],
-      filters: kind === 'video' ? [{ name: '비디오', extensions: ['mp4', 'mov', 'webm', 'm4v'] }] : [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+      filters: anyKind ? [{ name: '이미지·비디오', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'mov', 'webm', 'm4v'] }] : kind === 'video' ? [{ name: '비디오', extensions: ['mp4', 'mov', 'webm', 'm4v'] }] : [{ name: '이미지', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
     });
     if (r.canceled || !r.filePaths[0]) return { ok: true, canceled: true };
     fp = r.filePaths[0];
   }
   if (!fs.existsSync(fp)) return { ok: false, error: '파일을 찾지 못했습니다: ' + fp };
+  { const ext = path.extname(fp).toLowerCase(); if (/^\.(mp4|mov|webm|m4v)$/.test(ext)) kind = 'video'; else if (/^\.(png|jpe?g|webp|gif)$/.test(ext)) kind = 'image'; else return { ok: false, error: '그림·영상 파일이 아닙니다: ' + path.basename(fp) }; }   // 파일 종류가 이긴다(창에서 고른 파일)
   const c = _clipCtx(args.shortsNum); if (c.error) return { ok: false, error: c.error };   // 대화상자가 떠 있는 동안 대본이 바뀌었을 수 있다
   const pr = c.pr;
   const j = _clipSents(pr, [args.at]);
@@ -12721,15 +12776,25 @@ ipcMain.handle('add-media-clip', async (_e, args = {}) => {
       }
     }
     // 고른 파일 = 새 그룹의 그림/영상 (원본을 가리킨다)
+    //   ⚠ 「이미지 • 비디오 클립 추가하기」 창의 「내 이미지」는 이 대본 출력 폴더(media-N) 안의 그룹 그림일 수 있다 — 그대로 가리키면 두 그룹이 한 파일을 쓰고
+    //     번호 정리(renumberMediaFiles)가 옮긴다 → 그 안의 파일이면 사본을 만든다(v1.0.63 · B 그룹 복사와 같은 방식)
+    try {
+      const md0 = path.resolve(mediaDir).toLowerCase() + path.sep;
+      if (path.resolve(fp).toLowerCase().startsWith(md0)) {
+        const ext = path.extname(fp);
+        const dst = P.claimPath(path.join(mediaDir, '_pick' + Date.now().toString(36) + ext), null, [ext]);
+        fs.copyFileSync(fp, dst); fp = dst;
+      }
+    } catch (e) { log('⚠ 클립 추가 — 고른 그림의 사본을 만들지 못해 원본을 가리킵니다: ' + e.message); }
     _softenCoverOf(pr, N);
-    if (kind === 'video') { N.videoPath = fp; N.videoStatus = 'done'; N.videoCleared = false; N._userVideo = _visKey(fp); }
+    _dropVtrim(N); if (kind === 'video') { N.videoPath = fp; N.videoStatus = 'done'; N.videoCleared = false; N._userVideo = _visKey(fp); }
     else { N.imagePath = fp; N.imageStatus = 'done'; N.imageCleared = false; N._userImage = _visKey(fp); }
     try { renumberMediaFiles(pr, mediaDir); } catch {}
     UNDO.batch = false;
     _afterClipOp(pr, null);
     const gn = pr.groups.indexOf(N) + 1;
     log(`${kind === 'video' ? '🎬' : '🖼'} ${prLabel(pr)} 클립 ${args.at.after != null ? '' : ''}뒤에 ${kind === 'video' ? '비디오' : '이미지'} 클립 — 새 그룹 G${gn}(${path.basename(fp)}) · 문장 「${T}」는 바로 고치세요${B ? ` · 뒤 그룹 G${gn + 1} 은 앞 그림·영상을 복사해 이어 갖습니다` : ''} (Ctrl+Z 되돌리기)`);
-    return { ok: true, dto: P.toDTO(S.parsed), groupNum: gn, firstSentence: pr.sentences.indexOf(ns) };
+    return { ok: true, dto: P.toDTO(S.parsed), groupNum: gn, firstSentence: pr.sentences.indexOf(ns), kind };
   } catch (e) {
     UNDO.batch = false;
     log('⚠ 클립 추가(그림·영상) 오류: ' + ((e && e.message) || e) + ' — 중간까지 바뀌었을 수 있습니다(Ctrl+Z 로 되돌리세요)');

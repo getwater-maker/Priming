@@ -925,6 +925,15 @@ async function buildVrew({ sentences, groups, vrewPath, opts = {} }) {
       let _vsrc = g.videoPath;
       const _vsnd = _VLk.effVsound(g, opts.videoSound);   // 🔊 영상 소리 선택(그룹 값 > 채널 기본값 · 있으면 길이 맞추기도 영상의 소리를 지키며 한다)
       let _vmeta0 = readMp4VideoMeta(_vsrc);
+      // ✂ 비디오 시작점(look.vtrim · v1.0.63) — 고른 구간만 자른 사본을 원본처럼 쓴다(길이 맞추기·소리·필터·MP4 가 모두 그 구간 기준 · 규칙 core/visual-look vtrimSeg 한 곳)
+      { const _seg = _VLk.vtrimSeg(g.look && g.look.vtrim, _vmeta0 && _vmeta0.duration);
+        if (g.look && g.look.vtrim && !_seg) log(`[Vrew] G${g.num} 영상 시작점 설정이 지금 영상과 맞지 않아(영상이 바뀌었거나 전체 구간) 처음부터 씁니다`);
+        if (_seg) {
+          try {
+            const tr = await require('../core/video-fit').trimVideo(_vsrc, _seg, { log, label: `G${g.num} ` });
+            if (tr.path !== _vsrc) { const m1 = readMp4VideoMeta(tr.path); if (m1) { _vsrc = tr.path; _vmeta0 = m1; } }
+          } catch (e) { log(`⚠ G${g.num} 영상 시작점 오류: ${e.message}`); }
+        } }
       // 🔴 v0.5.50 — 그림 범위를 편 끝까지 늘린 5초 영상을 18분짜리 파일로 새로 구웠다(620MB) → .vrew 가 부풀어 Vrew 가 열다 멈췄다.
       //   맞출 길이가 FIT_MAX_SEC 를 넘으면 파일을 늘리지 않고 **Vrew 의 반복 재생**(샘플.vrew: sourceOut = 파일 길이 + endBehavior loop)에 맡긴다.
       let _loopNative = false;
