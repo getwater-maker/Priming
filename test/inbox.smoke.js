@@ -169,6 +169,23 @@ async function launch(args = [], env = ENV) {
     const st1 = await A.win.evaluate(() => window.api.inboxState());
     ok(st1.batches - st0.batches === 1 && st1.extended - st0.extended === 1, `같은 자동 제작 안에서 이어 붙였다(새로 시작 ${st1.batches - st0.batches}번 · 이어 붙임 ${st1.extended - st0.extended}편)`);
 
+    // ④-d 🔁 render + redo(v1.0.67) — 대본이 옛 .vrew 보다 오래되면 거절 · 고치면 옛 것을 _구판 으로 옮기고 다시 만든다(큐에 완료로 남은 옛 항목은 빼고 새로)
+    { const v1 = path.join(OUT, e1.name, e1.name + '.vrew');
+      note(e1, { redo: true }, 'redo_old.json');
+      const rj = await until(() => rejects().find((x) => /^redo_old/.test(x.f)), 20000);
+      ok(rj && rj.reason === '대본이 MP4 보다 새롭지 않음' && fs.existsSync(v1), '🔁 redo — 대본을 안 고쳤으면 거절(옛 .vrew 그대로): ' + (rj && rj.reason));
+      const vOld = fs.statSync(v1).mtimeMs;
+      fs.appendFileSync(e1.sp, NL + '### 절 고침' + NL + '> 🖼️ 이미지: a quiet room, soft light' + NL + NL + '고친 대본에 새로 넣은 문장이다.' + NL);
+      const before = dones().filter((x) => x.key === e1.key).length;
+      note(e1, { redo: true }, 'redo_new.json');
+      const dr = await until(() => dones().filter((x) => x.key === e1.key).length > before, 120000);
+      const gu = path.join(OUT, e1.name, '_구판');
+      const olds = fs.existsSync(gu) ? fs.readdirSync(gu).flatMap((d) => fs.readdirSync(path.join(gu, d))) : [];
+      ok(!!dr && olds.includes(e1.name + '.vrew'), '🔁 고친 대본 redo → 처리됨 · 옛 .vrew 는 _구판\\<KST>\\ 에(지우지 않음): ' + JSON.stringify(olds));
+      ok(fs.existsSync(v1) && fs.statSync(v1).mtimeMs > vOld, '🔁 새 .vrew 를 다시 만들었다');
+      const q2 = await A.win.evaluate(async (t) => (await window.api.listQueue()).queue.longform.items.filter((x) => x.title === t || (x.scriptPath || '').includes(t)).length, e1.name);
+      ok(q2 === 1, '🔁 큐에 같은 대본이 하나만(옛 항목을 빼고 새로 열었다): ' + q2); }
+
     // ④-c ■ 중단은 자동 제작보다 이긴다 — 멈춘 편은 다시 저절로 시작하지 않고(보류), 「▶ 자동 이어 가기」로 이어 간다
     const e7 = episode('1203', { sections: 40 });
     note(e7);

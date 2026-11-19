@@ -1949,7 +1949,7 @@ async function _openScriptEntries(entries, opts = {}) {   // opts.keepView = 화
 //   「만들었다」 = 출력 폴더의 .vrew · 저장 폴더의 같은 이름 MP4(화이트보드 포함) · 유튜브 업로드 기록에 같은 이름 MP4(올린 뒤 지운 파일).
 function _uploadedNames() {
   const set = new Set();
-  try { const all = JSON.parse(fs.readFileSync(require('./core/youtube-upload').uploadsFile(), 'utf8')) || {}; for (const k of Object.keys(all)) { const nm = k.split('|')[1]; if (nm) set.add(nm.toLowerCase()); } } catch (_) {}
+  try { const all = JSON.parse(fs.readFileSync(require('./core/youtube-upload').uploadsFile(), 'utf8')) || {}; for (const [k, rec] of Object.entries(all)) { if (rec && rec.gone) continue; const nm = k.split('|')[1]; if (nm) set.add(nm.toLowerCase()); } } catch (_) {}   // 🗑 유튜브에서 지워진 영상(gone) 기록은 빼고(v1.0.67)
   return set;
 }
 function _scriptMade(scriptPath, preset, uploaded) {
@@ -2074,7 +2074,7 @@ async function _inboxResumeDoing() {
     const ch = IB.pickChannel(sp, chans);
     if (!ch.ok) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: ch.reason, detail: ch.detail, rejectedAt: IB.kst() }); } catch (_) {} continue; }
     if (!IB.channelAllowed(ch.preset.name, AUTO.allow)) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: IB.REASON.notPilot, detail: `채널 「${ch.preset.name}」 — 받을 채널: ${AUTO.allow.join(' · ')}`, rejectedAt: IB.kst() }); } catch (_) {} continue; }
-    if (uploaded.has((_safeFolder(path.basename(sp).replace(/\.md$/i, '')) + '.mp4').toLowerCase())) {   // 이미 올렸다 = 끝난 편
+    if (r.note.kind !== 'upload' && uploaded.has((_safeFolder(path.basename(sp).replace(/\.md$/i, '')) + '.mp4').toLowerCase())) {   // 이미 올렸다 = 끝난 편(⬆ 업로드 쪽지는 업로드 관문이 판정 — 지워진 영상 기록일 수 있다)
       try { IB.finishNote(n.file, IB.SUB.done, { doneAt: IB.kst(), result: '성공', upload: 'done', note: '앱을 다시 켠 뒤 업로드 기록으로 확인' }); } catch (_) {}
       continue;
     }
@@ -2088,7 +2088,8 @@ async function _inboxResumeDoing() {
 // 새 쪽지 → 확인 → 진행중으로 옮기고 큐에 넣기(오래된 것부터)
 async function _inboxTake(notes) {
   const IB = require('./core/inbox');
-  const chans = _inboxChannels(), uploaded = _uploadedNames(), byName = new Map(chans.map((p) => [p.name, p]));
+  const chans = _inboxChannels(), byName = new Map(chans.map((p) => [p.name, p]));
+  let uploaded = _uploadedNames();
   const taken = new Set(), list = [];
   const TS = require('./core/today-scripts'), tRoot = (process.env.PM_UI_SMOKE && process.env.PM_INBOX_THUMBS) || thumbRoot();   // 🧪 시험만 임시 썸네일 폴더
   const deps = {
@@ -2113,8 +2114,16 @@ async function _inboxTake(notes) {
       log(`📥 받음(⬆ 업로드만) — ${c.key} · 채널 「${c.preset.name}」 · ${path.basename(c.mp4)}`);
       continue;
     }
-    const c = IB.checkNote(r.note, deps);
+    const redo = r.note.redo === true;   // 🔁 고친 대본 다시 만들기(v1.0.67) — 「이미 만들었음」 대신 prepareRedo 가 판정
+    const c = IB.checkNote(r.note, redo ? { ...deps, isMade: () => false, inQueue: (sp) => taken.has(_ibKey(sp)) || _inboxBusy(sp) } : deps);   // 🔁 큐에 쉬고 있는 옛 항목은 막지 않는다(아래에서 빼고 새로 연다)
     if (!c.ok) { _inboxReject(n.file, c.reason, c.detail); continue; }
+    if (redo) {
+      const rp = await _inboxRedoPrep(r.note.script, byName.get(c.preset.name) || c.preset);
+      if (!rp.ok) { _inboxReject(n.file, rp.reason, rp.detail); continue; }
+      uploaded = _uploadedNames();   // 「지워짐」을 찍었으니 다시 읽는다
+      _inboxDropIdle(r.note.script);
+      log(`🔁 다시 만들기 — ${c.key} · 옛 완성물 ${rp.moved.length}개를 _구판 으로 옮김${rp.moved.length ? ' (' + rp.moved.map((m) => path.basename(m.from)).join(' · ') + ')' : ''}${rp.gone.length ? ` · 유튜브에서 지워진 영상 기록 ${rp.gone.length}개에 「지워짐」` : ''}`);
+    }
     let doing;
     try { doing = IB.moveNote(n.file, IB.SUB.doing, { priming: { acceptedAt: IB.kst(), channel: c.preset.name, version: 'v' + appDiskVersion() } }); }
     catch (e) { log(`📥 쪽지를 옮기지 못했습니다(${n.name}): ${e.message} — 다음에 다시 봅니다`); continue; }
@@ -2130,6 +2139,28 @@ function _inboxMp4Of(sp, preset) {
   const base = _safeFolder(path.basename(sp).replace(/\.md$/i, ''));
   if (require('./core/queue-channel').normOutTarget(preset && preset.outTarget) === 'whiteboard') { const wb = wbFinalDir(preset); return path.join(wb || computeOutRoot(sp, preset, 'longform'), base + '_whiteboard.mp4'); }
   return uploadMp4Path(base, preset, path.join(computeOutRoot(sp, preset, 'longform'), base + '.vrew'));
+}
+// 🔁 render + redo — 옛 완성물(.vrew · 업로드용 MP4 · 화이트보드 MP4)과 이 이름의 업로드 기록을 core/inbox.prepareRedo 에 넘긴다(판정·옮기기는 거기 한 곳)
+async function _inboxRedoPrep(sp, preset) {
+  const YT = require('./core/youtube-upload');
+  const base = _safeFolder(path.basename(sp).replace(/\.md$/i, ''));
+  const vrew = path.join(computeOutRoot(sp, preset, 'longform'), base + '.vrew');
+  const wb = wbFinalDir(preset);
+  const files = [vrew, uploadMp4Path(base, preset, vrew), path.join(wb || path.dirname(vrew), base + '_whiteboard.mp4')];
+  const records = [...YT.recordsByName(base + '.mp4'), ...YT.recordsByName(base + '_whiteboard.mp4')];
+  return require('./core/inbox').prepareRedo({ scriptPath: sp, files, records, exists: (ch, v) => YT.videoExists(ch, v), markGone: (v) => YT.markGone(v) });
+}
+// 🔁 redo — 큐에 쉬고 있는 같은 대본의 옛 항목(만들거나 올리는 중이 아닌 것)을 뺀다 → _inboxOpen 이 고친 대본으로 새로 연다(옛 항목이 「완료」로 남아 _inboxPlan 이 건너뛰지 않게)
+function _inboxDropIdle(sp) {
+  const q = S.modes.longform;
+  const it = q.items.find((x) => _ibKey(x.scriptPath) === _ibKey(sp));
+  if (!it || _inboxBusy(sp)) return false;
+  if (q.activeId === it.id && S.mode === 'longform') { try { flushAutoSave(); } catch (_) {} }
+  q.items = q.items.filter((x) => x.id !== it.id);
+  if (q.activeId === it.id) { q.activeId = q.items.length ? q.items[q.items.length - 1].id : null; syncActiveToS(); }
+  writeWorkspace();
+  log(`🔁 큐의 옛 항목을 빼고 고친 대본으로 새로 엽니다 — ${path.basename(sp)}`);
+  return true;
 }
 // 지금 만들거나 올리는 중인 대본인가(받은 편 진행 중 · 큐에서 만드는 중 · 업로드 줄에 서 있음)
 function _inboxBusy(sp) {
@@ -3712,6 +3743,7 @@ async function runYtUpload({ file, channelId, meta, force = false, finish = null
   if (!force) {
     const dup = await YT.checkDuplicate({ channelId, file, title });
     if (dup.warn) log(`⚠ ${dup.warn}`);
+    if (dup.gone && dup.gone.length) log(`🗑 이 PC 기록의 영상이 유튜브에서 지워졌습니다 — ${dup.gone.map((v) => 'https://youtu.be/' + v).join(' · ')} → 기록에 「지워짐」을 찍고(기록은 남김) 다시 올릴 수 있게 합니다`);
     if (dup.dup) {
       log(`⏭ 유튜브 업로드 건너뜀 — 「${title}」: ${dup.reason} → ${dup.url}`);
       if (finish && dup.videoId) await runYtFinish({ channelId, videoId: dup.videoId, title, finish });   // 🧷 이미 올린 영상도 마무리(빠진 것만)

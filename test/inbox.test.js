@@ -151,7 +151,15 @@ ok(/ipcMain\.handle\('run-batch', \(_e, args = \{\}\) => _runBatch\(/.test(M), '
 ok(/if \(i >= plan\.length\) \{[\s\S]{0,200}args\.extend/.test(rb), '계획이 끝나면 extend 로 이어 받는다');
 ok(/uploadAfter: _auto \? _auto\.uploadAfter : \(\(common\.uploadAfter === 'on' \|\| common\.uploadAfter === 'off'\) \? common\.uploadAfter : null\)/.test(rb), '⬆ 자동 제작 = 채널 업로드채널 · 화면 큐 = 헤더 체크박스만(10-14 규칙 그대로)');
 { const tk = M.slice(M.indexOf('async function _inboxTake('), M.indexOf('function _inboxMp4Of('));
-  ok(tk.indexOf("r.note.kind === 'upload'") > 0 && tk.indexOf("r.note.kind === 'upload'") < tk.indexOf('IB.checkNote(r.note, deps)'), '⬆ 업로드 쪽지는 만들기 판정(checkNote) 전에 갈라진다');
+  ok(tk.indexOf("r.note.kind === 'upload'") > 0 && tk.indexOf("r.note.kind === 'upload'") < tk.indexOf('IB.checkNote(r.note,'), '⬆ 업로드 쪽지는 만들기 판정(checkNote) 전에 갈라진다');
+  // 🔁 redo(v1.0.67) — 「이미 만들었음」만 빼고 checkNote 를 그대로 지난 뒤 prepareRedo · 거절이면 큐에 넣지 않는다 · 「지워짐」 뒤 업로드 기록을 다시 읽는다
+  ok(/IB\.checkNote\(r\.note, redo \? \{ \.\.\.deps, isMade: \(\) => false \} : deps\)/.test(tk), '🔁 redo 쪽지 = 「이미 만들었음」만 빼고 같은 checkNote(패키징·큐·시범 채널은 그대로)');
+  const iPrep = tk.indexOf('await _inboxRedoPrep('), iMove = tk.indexOf('IB.moveNote(n.file, IB.SUB.doing', tk.indexOf('IB.checkNote(r.note,'));
+  ok(iPrep > 0 && iPrep < iMove && /if \(!rp\.ok\) \{ _inboxReject\(n\.file, rp\.reason, rp\.detail\); continue; \}/.test(tk) && /uploaded = _uploadedNames\(\)/.test(tk), '🔁 옛 완성물 정리(prepareRedo)가 진행중으로 옮기기 전 · 실패면 거절');
+  const rpf = M.slice(M.indexOf('async function _inboxRedoPrep('), M.indexOf('// 지금 만들거나 올리는 중인 대본인가'));
+  ok(/prepareRedo\(\{ scriptPath: sp, files, records, exists: \(ch, v\) => YT\.videoExists\(ch, v\), markGone: \(v\) => YT\.markGone\(v\) \}\)/.test(rpf) && /uploadMp4Path\(base, preset, vrew\)/.test(rpf) && /recordsByName\(base \+ '\.mp4'\)/.test(rpf), '🔁 _inboxRedoPrep = .vrew·업로드 MP4·화이트보드 MP4 + 이 이름 업로드 기록 → prepareRedo 한 곳');
+  ok(/for \(const \[k, rec\] of Object\.entries\(all\)\) \{ if \(rec && rec\.gone\) continue;/.test(M.slice(M.indexOf('function _uploadedNames('), M.indexOf('function _scriptMade('))), '🗑 「만들었음」 판정의 업로드 기록에서 지워진 영상(gone)은 뺀다');
+  ok(/r\.note\.kind !== 'upload' && uploaded\.has\(/.test(M), '🗑 다시 켤 때 업로드 쪽지는 기록만 보고 끝내지 않는다(관문이 판정)');
   const uo = M.slice(M.indexOf('async function _inboxUploadOnly('), M.indexOf('// 자동으로 만들 계획'));
   ok(uo.length > 200 && !/runMakeAllCore|_runBatch\(|makeRun\(/.test(uo), '업로드만 = 제작 길을 부르지 않는다');
   ok(/made: IB\.kst\(\)[\s\S]{0,200}enqueueYtUpload\(\{[^}]*itemId: it\.id/.test(uo), '업로드만 = rec.made 를 먼저 찍고 그 항목 id 로 업로드 줄(끝나면 쪽지를 처리됨으로)');
@@ -171,6 +179,47 @@ ok(/WORLD\.run\('longform', \(\) => _runBatch\(/.test(M), '자동 제작은 롱�
 const ED = require('../core/edition');
 ok(ED.fileFeature('core/inbox.js') === 'inbox' && !ED.has('inbox', 'member') && ED.channelFeature('inbox-state') === 'inbox', '판매판엔 받은 편지함이 없다(파일·IPC)');
 
-fs.rmSync(TMP, { recursive: true, force: true });
-console.log(`\n${bad ? '❌' : '✅'} 받은 편지함 단위 ${n - bad}/${n}`);
-process.exit(bad ? 1 : 0);
+// [11] 🔁 render + redo — 고친 대본 다시 만들기(v1.0.67) · core/inbox.prepareRedo
+(async () => {
+  ok(IB.validateNote({ ...good, redo: true }) === '' && /redo/.test(IB.validateNote({ ...good, redo: 'yes' })) && /render/.test(IB.validateNote({ ver: 1, kind: 'upload', script: sp, redo: true })), '[11] redo 꼴 — true/false · render 에만');
+  const R = path.join(TMP, 'redo');
+  const rs = w(path.join(R, '대본', '[역_1124] 최영.md'), '# 고친 대본\n');
+  const out = path.join(R, '출력', '[역_1124] 최영'), up = path.join(R, '올림');
+  const mk = (p, t) => { w(p, 'old'); fs.utimesSync(p, t / 1000, t / 1000); return p; };
+  const T0 = Date.now() - 3 * 86400e3;
+  const vrew = mk(path.join(out, '[역_1124] 최영.vrew'), T0), mp4 = mk(path.join(up, '[역_1124] 최영.mp4'), T0 + 60e3);
+  const wbNone = path.join(up, '[역_1124] 최영_whiteboard.mp4');
+  const marked = [];
+  const RD = (o = {}) => ({ scriptPath: rs, files: [vrew, mp4, wbNone], records: [], exists: async () => ({ ok: true, exists: false }), markGone: (v) => marked.push(v), now: Date.parse('2026-11-19T12:30:00Z'), ...o });
+  // 대본이 옛 완성물보다 오래됐으면 거절(옮기지 않는다)
+  fs.utimesSync(rs, (T0 + 30e3) / 1000, (T0 + 30e3) / 1000);
+  let r = await IB.prepareRedo(RD());
+  ok(!r.ok && r.reason === '대본이 MP4 보다 새롭지 않음' && fs.existsSync(vrew) && fs.existsSync(mp4), '대본이 MP4 보다 오래됐으면 거절 · 아무것도 옮기지 않는다');
+  fs.utimesSync(rs, Date.now() / 1000, Date.now() / 1000);
+  // 유튜브에 아직 있으면 · 확인이 안 되면 거절(fail-closed) — 기록에 표시하지 않는다
+  r = await IB.prepareRedo(RD({ records: [{ channelId: 'UC', videoId: 'V_LIVE' }], exists: async () => ({ ok: true, exists: true }) }));
+  ok(!r.ok && r.reason === '유튜브에 아직 있음' && /V_LIVE/.test(r.detail) && !marked.length && fs.existsSync(mp4), '유튜브에 아직 있으면 거절(두 편이 된다)');
+  r = await IB.prepareRedo(RD({ records: [{ channelId: 'UC', videoId: 'V_X' }], exists: async () => ({ ok: false, error: 'boom' }) }));
+  ok(!r.ok && r.reason === '유튜브 확인 실패' && !marked.length && fs.existsSync(mp4), '확인이 안 되면 거절(fail-closed)');
+  // 통과 — 지워진 영상에 「지워짐」 · 옛 .vrew·MP4 를 그 폴더 _구판\<KST> 로 옮긴다(지우지 않는다)
+  r = await IB.prepareRedo(RD({ records: [{ channelId: 'UC', videoId: 'clnAyPeV3as' }] }));
+  const vTo = path.join(out, '_구판', '20261119-2130', '[역_1124] 최영.vrew'), mTo = path.join(up, '_구판', '20261119-2130', '[역_1124] 최영.mp4');
+  ok(r.ok && r.moved.length === 2 && r.gone[0] === 'clnAyPeV3as' && marked[0] === 'clnAyPeV3as', '통과 — 옛 완성물 2개 옮김 · 지워진 영상 기록에 표시');
+  ok(!fs.existsSync(vrew) && !fs.existsSync(mp4) && fs.readFileSync(vTo, 'utf8') === 'old' && fs.readFileSync(mTo, 'utf8') === 'old', '옛 파일은 _구판\\<KST 시각>\\ 에 그대로(⛔ 지우지 않는다)');
+  // 옛 완성물이 없으면(이미 치웠음) 업로드 기록만 정리하고 통과
+  r = await IB.prepareRedo(RD({ records: [] }));
+  ok(r.ok && r.moved.length === 0, '옛 완성물이 없으면 옮길 것 없이 통과');
+  // 같은 시각에 또 옮기면 _2
+  mk(vrew, T0);
+  r = await IB.prepareRedo(RD());
+  ok(r.ok && fs.existsSync(path.join(out, '_구판', '20261119-2130', '[역_1124] 최영_2.vrew')), '같은 자리에 구판이 있으면 _2 로(덮지 않는다)');
+  // 하나라도 못 옮기면 옮긴 것을 되돌리고 거절
+  mk(vrew, T0); mk(mp4, T0);
+  const blocker = path.join(up, '_구판'); fs.rmSync(blocker, { recursive: true, force: true }); w(blocker, 'file');   // _구판 자리에 파일 → 폴더를 못 만든다
+  r = await IB.prepareRedo(RD());
+  ok(!r.ok && r.reason === '구판 옮기기 실패' && fs.existsSync(vrew) && fs.existsSync(mp4), '하나라도 못 옮기면 옮긴 것을 되돌리고 거절');
+
+  fs.rmSync(TMP, { recursive: true, force: true });
+  console.log(`\n${bad ? '❌' : '✅'} 받은 편지함 단위 ${n - bad}/${n}`);
+  process.exit(bad ? 1 : 0);
+})().catch((e) => { console.error('❌', e); process.exit(1); });

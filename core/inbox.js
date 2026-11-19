@@ -32,6 +32,10 @@ const REASON = {
   noUploadCh: '업로드채널 없음',   // ⬆ kind "upload"
   noMp4: 'MP4 없음',
   upFail: '업로드 준비 실패',
+  notNewer: '대본이 MP4 보다 새롭지 않음',   // 🔁 render + redo(v1.0.67)
+  stillLive: '유튜브에 아직 있음',
+  ytCheck: '유튜브 확인 실패',
+  redoFail: '구판 옮기기 실패',
 };
 const YOUNG_MS = 15000;   // 막 놓인(쓰는 중일 수 있는) 쪽지를 읽지 못하면 다음 번에 다시 본다
 
@@ -92,6 +96,8 @@ function validateNote(n) {
   if (n.packaging != null && typeof n.packaging !== 'string') return 'packaging 은 문자열(경로)이어야 합니다';
   if (n.thumbnails != null && !(Array.isArray(n.thumbnails) && n.thumbnails.every((x) => typeof x === 'string'))) return 'thumbnails 는 경로 문자열 목록이어야 합니다';
   if (n.publishAt != null && typeof n.publishAt !== 'string') return 'publishAt 은 문자열(KST "YYYY-MM-DD HH:MM")이어야 합니다';
+  if (n.redo != null && typeof n.redo !== 'boolean') return 'redo 는 true·false 여야 합니다';
+  if (n.redo === true && n.kind !== 'render') return 'redo 는 kind "render" 에만 씁니다';
   return '';
 }
 
@@ -200,6 +206,47 @@ function checkUploadNote(note, d) {
   return { ok: true, preset: ch.preset, key: noteKey(note), mp4 };
 }
 
+/**
+ * 🔁 render + `"redo": true` — 고친 대본을 다시 만든다(v1.0.67 · 11-19 역사 1124). checkNote 를 「이미 만들었음」 없이 통과한 뒤 main 이 부른다.
+ *   ① 대본이 옛 완성물(.vrew · MP4)보다 새로워야 한다(같으면 다시 만들 까닭이 없다 — 그대로 다시 올리려면 kind "upload")
+ *   ② 이 이름 MP4 의 업로드 기록(지워지지 않은 것)마다 유튜브에 영상이 아직 있는지 본다 — 있으면 거절(두 편이 된다) · 확인이 안 되면 거절(fail-closed)
+ *   ③ 지워진 영상 기록은 「지워짐」 표시(기록은 남긴다) → 옛 완성물을 그 폴더의 `_구판\<KST>\` 로 옮긴다(⛔ 지우지 않는다 · 하나라도 못 옮기면 옮긴 것을 되돌리고 거절)
+ * d = { scriptPath, files:[옛 완성물 후보 경로], records:[{channelId, videoId}], exists: async(channelId, videoId)→{ok, exists, error?}, markGone(videoId), now? }
+ * → { ok:true, moved:[{from,to}], gone:[videoId] } | { ok:false, reason, detail }
+ */
+async function prepareRedo(d) {
+  let sm = 0;
+  try { sm = fs.statSync(d.scriptPath).mtimeMs; } catch (e) { return { ok: false, reason: REASON.noScript, detail: d.scriptPath }; }
+  const old = [];
+  for (const f of new Set(d.files || [])) { try { const st = fs.statSync(f); if (st.isFile()) old.push({ f, m: st.mtimeMs }); } catch (_) {} }
+  const newest = old.reduce((a, x) => Math.max(a, x.m), 0);
+  if (old.length && sm <= newest) return { ok: false, reason: REASON.notNewer, detail: `대본 ${kst(sm)} · 옛 완성물 ${kst(newest)} (KST) — 그대로 다시 올리려면 kind "upload"` };
+  const gone = [];
+  for (const r of d.records || []) {
+    const v = await d.exists(r.channelId, r.videoId);
+    if (!v || !v.ok) return { ok: false, reason: REASON.ytCheck, detail: `https://youtu.be/${r.videoId} — ${(v && v.error) || '알 수 없음'}` };
+    if (v.exists) return { ok: false, reason: REASON.stillLive, detail: `https://youtu.be/${r.videoId} — 먼저 Studio 에서 지우거나, 그 영상을 두고 다시 만들 까닭이 없는지 보세요` };
+    gone.push(r.videoId);
+  }
+  for (const v of gone) { try { d.markGone(v); } catch (_) {} }
+  const stamp = kst(d.now || Date.now()).replace(/[-:]/g, '').replace(' ', '-').slice(0, 13);   // 20261119-2130
+  const moved = [];
+  for (const x of old) {
+    const dir = path.join(path.dirname(x.f), '_구판', stamp);
+    let to = path.join(dir, path.basename(x.f));
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      for (let k = 2; fs.existsSync(to); k++) to = path.join(dir, `${path.basename(x.f, path.extname(x.f))}_${k}${path.extname(x.f)}`);
+      fs.renameSync(x.f, to);
+      moved.push({ from: x.f, to });
+    } catch (e) {
+      for (const m of moved.reverse()) { try { fs.renameSync(m.to, m.from); } catch (_) {} }
+      return { ok: false, reason: REASON.redoFail, detail: `${path.basename(x.f)} — ${e.message}` };
+    }
+  }
+  return { ok: true, moved, gone };
+}
+
 /** 쪽지를 하위 폴더로 옮긴다(내용에 patch 를 더해) → 새 경로. 같은 이름이 있으면 _2, _3 … */
 function moveNote(file, sub, patch = {}, rawText = null, root = null) {
   let obj;
@@ -253,6 +300,6 @@ function writeProgress(doc) { try { writeJsonAtomic(progressFile(), { ver: 1, at
 
 module.exports = {
   SUB, REASON, YOUNG_MS, baseDir, inboxDir, progressFile, stateFile, kst, writeJsonAtomic,
-  loadState, saveState, channelAllowed, DEFAULT_ALLOW, validateNote, readNote, listNotes, noteKey, pickChannel, thumbAOf, checkNote, checkUploadNote, moveNote, finishNote,
+  loadState, saveState, channelAllowed, DEFAULT_ALLOW, validateNote, readNote, listNotes, noteKey, pickChannel, thumbAOf, checkNote, checkUploadNote, prepareRedo, moveNote, finishNote,
   autoItemOpts, stageOf, writeProgress, STAGE_KO,
 };

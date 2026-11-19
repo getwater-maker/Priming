@@ -405,16 +405,54 @@ function _uploads() { try { return JSON.parse(fs.readFileSync(uploadsFile(), 'ut
 function _fileSig(channelId, file) {
   try { const st = fs.statSync(file); return `${channelId}|${path.basename(file)}|${st.size}|${Math.round(st.mtimeMs)}`; } catch (_) { return ''; }
 }
-/** 이 채널에 이 파일(이름·크기·수정시각이 같은 것)을 이미 올렸나 → {videoId, at} | null */
+// 🗑 기록의 `gone`(KST) = 그 영상이 유튜브에서 지워진 것을 videos.list 로 확인했다(v1.0.67) — 기록은 남기고(이력) 「이미 올렸음」 판정에서만 뺀다.
+const _live = (rec) => !!(rec && !rec.gone);
+/** 이 채널에 이 파일(이름·크기·수정시각이 같은 것)을 이미 올렸나 → {videoId, at} | null(지워진 영상 기록은 없는 것으로) */
 function findUploaded(channelId, file) {
   const k = _fileSig(channelId, file);
-  return (k && _uploads()[k]) || null;
+  const rec = k && _uploads()[k];
+  return _live(rec) ? rec : null;
 }
+function _saveUploads(all) { try { fs.mkdirSync(_dir(), { recursive: true }); fs.writeFileSync(uploadsFile(), JSON.stringify(all, null, 2), 'utf8'); return true; } catch (_) { return false; } }
 function _recordUpload(channelId, file, rec) {
   const k = _fileSig(channelId, file);
   if (!k) return;
-  const all = _uploads(); all[k] = rec;
-  try { fs.mkdirSync(_dir(), { recursive: true }); fs.writeFileSync(uploadsFile(), JSON.stringify(all, null, 2), 'utf8'); } catch (_) {}
+  const all = _uploads();
+  const old = all[k];
+  if (old && old.gone) rec = { ...rec, prev: [...(old.prev || []), { ...old, prev: undefined }] };   // 지워진 영상을 같은 파일로 다시 올림 — 옛 기록은 prev 로 남긴다
+  all[k] = rec;
+  _saveUploads(all);
+}
+/** 이 영상의 기록 모두에 「지워짐」 표시 → 표시한 기록 수 */
+function markGone(videoId, at = _kst()) {
+  if (!videoId) return 0;
+  const all = _uploads();
+  let n = 0;
+  for (const rec of Object.values(all)) if (rec && rec.videoId === videoId && !rec.gone) { rec.gone = at; n++; }
+  if (n) _saveUploads(all);
+  return n;
+}
+/** MP4 이름(대소문자 무시)으로 지워지지 않은 기록 → [{ channelId, videoId, at, title }](영상 하나에 하나) */
+function recordsByName(name) {
+  const want = String(name || '').toLowerCase(), out = [], seen = new Set();
+  for (const [k, rec] of Object.entries(_uploads())) {
+    const [ch, nm] = k.split('|');
+    if (!_live(rec) || !rec.videoId || String(nm || '').toLowerCase() !== want || seen.has(rec.videoId)) continue;
+    seen.add(rec.videoId); out.push({ channelId: ch, videoId: rec.videoId, at: rec.at || '', title: rec.title || '' });
+  }
+  return out;
+}
+/** 영상이 아직 유튜브에 있나(소유자 토큰 · videos.list 1단위 · 비공개도 보인다) → { ok:true, exists, privacy } | { ok:false, error } */
+async function videoExists(channelId, videoId) {
+  const t = await accessToken(channelId);
+  if (!t.ok) return { ok: false, error: t.error };
+  try {
+    const r = await fetch(`${EP.api}/videos?part=status&id=${encodeURIComponent(videoId)}`, { headers: { Authorization: `Bearer ${t.token}` } });
+    const j = await _json(r);
+    if (r.status !== 200) return { ok: false, error: `영상 확인 실패(${r.status}) — ${(j.error && j.error.message) || ''}` };
+    const it = (j.items || [])[0];
+    return { ok: true, exists: !!it, privacy: (it && it.status && it.status.privacyStatus) || '' };
+  } catch (e) { return { ok: false, error: `구글에 연결하지 못했습니다: ${e.message}` }; }
 }
 
 // ── 🛡 중복 업로드 방지(v0.5.105 · 로이 2026-10-01 「중복으로 올라갈 수 있는 경우를 없앨 수 있어?」) ─────────────────
@@ -428,7 +466,7 @@ function findUploadedByTitle(channelId, title) {
   const want = normTitle(title); if (!want) return null;
   const all = _uploads();
   for (const [k, rec] of Object.entries(all)) {
-    if (!k.startsWith(channelId + '|') || !rec || !rec.title) continue;
+    if (!k.startsWith(channelId + '|') || !_live(rec) || !rec.title) continue;
     if (normTitle(rec.title) === want) return rec;
   }
   return null;
@@ -476,17 +514,28 @@ function _noteUploaded(channelId, title, videoId) {
  * 올리기 전 중복 판정 → {dup:true, where:'file'|'local'|'channel', videoId, url, at?, privacy?, reason} | {dup:false, warn?}
  *   하나라도 맞으면 중복. 유튜브 확인이 실패하면 dup:false + warn(로컬 판정만으로 진행).
  */
+//   🗑 (a)(b) 이 PC 기록이 맞으면(remote 일 때) 그 영상이 아직 유튜브에 있는지 videos.list 로 본다(v1.0.67 · 11-19 역사 정리로 Studio 에서 지운 영상을 다시 올려야 했다) —
+//      없으면 기록에 「지워짐」을 찍고(기록은 남김) 다음 판정으로 · 있거나 확인이 안 되면 예전처럼 중복(⛔ 확인 실패로 두 번 올리지 않는다).
 async function checkDuplicate({ channelId, file, title, remote = true }) {
-  const f = file ? findUploaded(channelId, file) : null;
-  if (f) return { dup: true, where: 'file', videoId: f.videoId, url: `https://youtu.be/${f.videoId}`, at: f.at, reason: `이 파일은 ${f.at} 에 이미 올렸습니다` };
-  const l = findUploadedByTitle(channelId, title);
-  if (l) return { dup: true, where: 'local', videoId: l.videoId, url: `https://youtu.be/${l.videoId}`, at: l.at, reason: `같은 제목의 영상을 ${l.at} 에 이미 올렸습니다(파일을 다시 만들었거나 이름을 바꿨어도 같은 영상으로 봅니다)` };
-  if (!remote) return { dup: false };
+  const gone = [];
+  for (let guard = 0; guard < 8; guard++) {
+    const f = file ? findUploaded(channelId, file) : null;
+    const l = f ? null : findUploadedByTitle(channelId, title);
+    const hit = f || l;
+    if (!hit) break;
+    if (remote && hit.videoId && !gone.includes(hit.videoId)) {
+      const v = await videoExists(channelId, hit.videoId);
+      if (v.ok && !v.exists) { markGone(hit.videoId); gone.push(hit.videoId); continue; }
+    }
+    if (f) return { dup: true, where: 'file', videoId: f.videoId, url: `https://youtu.be/${f.videoId}`, at: f.at, gone, reason: `이 파일은 ${f.at} 에 이미 올렸습니다` };
+    return { dup: true, where: 'local', videoId: l.videoId, url: `https://youtu.be/${l.videoId}`, at: l.at, gone, reason: `같은 제목의 영상을 ${l.at} 에 이미 올렸습니다(파일을 다시 만들었거나 이름을 바꿨어도 같은 영상으로 봅니다)` };
+  }
+  if (!remote) return { dup: false, gone };
   const r = await listChannelTitles(channelId);
-  if (!r.ok) return { dup: false, warn: `유튜브 채널의 영상 목록을 확인하지 못했습니다 — 이 PC 기록만으로 진행합니다 (${r.error})` };
+  if (!r.ok) return { dup: false, gone, warn: `유튜브 채널의 영상 목록을 확인하지 못했습니다 — 이 PC 기록만으로 진행합니다 (${r.error})` };
   const hit = r.map.get(normTitle(title));
-  if (hit) return { dup: true, where: 'channel', videoId: hit.videoId, url: `https://youtu.be/${hit.videoId}`, privacy: hit.privacy, reason: `유튜브 채널에 같은 제목의 영상이 이미 있습니다(${hit.privacy === 'private' ? '비공개' : hit.privacy || '공개 상태 미상'} · 다른 PC·스튜디오에서 올린 것 포함)` };
-  return { dup: false };
+  if (hit) return { dup: true, where: 'channel', videoId: hit.videoId, url: `https://youtu.be/${hit.videoId}`, privacy: hit.privacy, gone, reason: `유튜브 채널에 같은 제목의 영상이 이미 있습니다(${hit.privacy === 'private' ? '비공개' : hit.privacy || '공개 상태 미상'} · 다른 PC·스튜디오에서 올린 것 포함)` };
+  return { dup: false, gone };
 }
 
 // ── 재개 가능 업로드 ────────────────────────────────────────────────────────
@@ -683,6 +732,6 @@ function reorderChannels(ids) {
 
 module.exports = {
   SCOPES, DEFAULT_DAILY_CAP, available, status, parseClientJson, importClient, useDefaultClient, uploadsToday, connectChannel, disconnect, accessToken, reorderChannels, setMemo,
-  uploadVideo, findUploaded, findUploadedByTitle, listChannelTitles, checkDuplicate, normTitle, _clearRemoteTitles: () => _remoteTitles.clear(), cleanTitle, cleanDescription, cleanTags, explainApiError,
+  uploadVideo, findUploaded, findUploadedByTitle, listChannelTitles, checkDuplicate, videoExists, markGone, recordsByName, normTitle, _clearRemoteTitles: () => _remoteTitles.clear(), cleanTitle, cleanDescription, cleanTags, explainApiError,
   authFile, uploadsFile, setAuthProfile, authProfile, _setEndpoints, _setCrypto, _setDefaultClient,
 };

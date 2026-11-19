@@ -28,6 +28,12 @@ const server = http.createServer((req, res) => {
   req.resume();
   if (u.pathname === '/token') return J(200, { access_token: 'AT1', expires_in: 3600 });
   if (u.pathname === '/api/channels') { G.chanCalls++; if (G.fail) return J(G.fail, { error: { message: 'boom' } }); return J(200, { items: [{ contentDetails: { relatedPlaylists: { uploads: 'UU_TEST' } } }] }); }
+  if (u.pathname === '/api/videos') {   // 🗑 v1.0.67 — 지워진 영상 확인(G.live = 아직 있는 영상 · G.vfail = 확인 실패)
+    G.vidCalls = (G.vidCalls || 0) + 1;
+    if (G.vfail) return J(G.vfail, { error: { message: 'boom' } });
+    const id = u.searchParams.get('id');
+    return J(200, { items: (G.live || []).includes(id) ? [{ id, status: { privacyStatus: 'unlisted' } }] : [] });
+  }
   if (u.pathname === '/api/playlistItems') {
     G.listCalls++;
     const start = Number(u.searchParams.get('pageToken') || 0);
@@ -88,6 +94,30 @@ const server = http.createServer((req, res) => {
   G.fail = 0;
   const bad = await YT.checkDuplicate({ channelId: 'UC_NOPE', file: reMp4, title: '연결 안 된 채널' });
   ok(!bad.dup && /연결/.test(bad.warn || ''), '연결 안 된 채널 → 경고(로컬 판정만)');
+
+  console.log('\n[6b] 🗑 유튜브에서 지운 영상의 이 PC 기록 — 「지워짐」을 찍고 다시 올릴 수 있다(v1.0.67)');
+  G.videos = []; YT._clearRemoteTitles();
+  const sig = (f) => { const st = fs.statSync(f); return `UC_T|${path.basename(f)}|${st.size}|${Math.round(st.mtimeMs)}`; };
+  fs.writeFileSync(YT.uploadsFile(), JSON.stringify({ [sig(mp4)]: { videoId: 'V_GONE', at: '2026-11-18 02:02', title: '지운 영상' }, 'UC_T|X.mp4|1|1': { videoId: 'V_LIVE', at: '2026-11-18 03:00', title: '살아 있는 영상' } }));
+  G.live = ['V_LIVE'];
+  ok(YT.findUploaded('UC_T', mp4) && YT.findUploaded('UC_T', mp4).videoId === 'V_GONE', '확인 전에는 같은 파일 기록이 보인다');
+  d = await YT.checkDuplicate({ channelId: 'UC_T', file: mp4, title: '지운 영상' });
+  ok(!d.dup && d.gone.length === 1 && d.gone[0] === 'V_GONE', '같은 파일 기록이어도 유튜브에 없으면 중복 아님 · gone 으로 알린다');
+  let recs = JSON.parse(fs.readFileSync(YT.uploadsFile(), 'utf8'));
+  ok(recs[sig(mp4)] && recs[sig(mp4)].videoId === 'V_GONE' && /^\d{4}-\d{2}-\d{2}/.test(recs[sig(mp4)].gone || ''), '기록은 남기고 gone(KST)만 찍는다(이력)');
+  ok(!YT.findUploaded('UC_T', mp4) && !YT.findUploadedByTitle('UC_T', '지운 영상'), '찍은 뒤에는 파일·제목 판정에서 빠진다');
+  ok(YT.recordsByName(path.basename(mp4)).length === 0 && YT.recordsByName('x.MP4').length === 1, 'recordsByName — 지워진 기록은 빼고 · 이름은 대소문자 무시');
+  d = await YT.checkDuplicate({ channelId: 'UC_T', file: null, title: '살아 있는 영상' });
+  ok(d.dup && d.where === 'local' && d.videoId === 'V_LIVE', '판정력: 유튜브에 아직 있으면 예전처럼 중복');
+  G.vfail = 500;
+  fs.writeFileSync(YT.uploadsFile(), JSON.stringify({ 'UC_T|Y.mp4|1|1': { videoId: 'V_UNK', at: '2026-11-18 04:00', title: '확인 안 되는 영상' } }));
+  d = await YT.checkDuplicate({ channelId: 'UC_T', file: null, title: '확인 안 되는 영상' });
+  ok(d.dup && d.videoId === 'V_UNK' && !JSON.parse(fs.readFileSync(YT.uploadsFile(), 'utf8'))['UC_T|Y.mp4|1|1'].gone, '확인이 안 되면 중복으로 막는다(⛔ 두 번 올리지 않는다) · gone 을 찍지 않는다');
+  G.vfail = 0;
+  const v0 = G.vidCalls;
+  d = await YT.checkDuplicate({ channelId: 'UC_T', file: null, title: '확인 안 되는 영상', remote: false });
+  ok(d.dup && G.vidCalls === v0, 'remote:false 면 유튜브에 묻지 않는다(예전 그대로)');
+  ok((await YT.videoExists('UC_NOPE', 'V1')).ok === false, '연결 안 된 채널 → ok:false');
 
   console.log('\n[7] main.js 배선 — 모든 업로드 경로가 하나의 관문을 지난다');
   ok(/async function runYtUpload\(\{ file, channelId, meta, force = false, finish = null(?:, noSchedule = false)? \}\)/.test(M), 'runYtUpload 에 force · 🧷 finish');

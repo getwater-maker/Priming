@@ -179,6 +179,11 @@ const server = http.createServer(async (req, res) => {
   ok(prog.some((p) => p.phase === 'upload' && p.sent > 0 && p.sent < p.total) && prog[prog.length - 1].phase === 'done', '진행 이벤트(upload → done)');
   ok(YT.findUploaded('UC_TEST_1', mp4) && YT.findUploaded('UC_TEST_1', mp4).videoId === 'VID_OK_1', '올린 기록 → 같은 파일 재업로드 판정');
   ok(!YT.findUploaded('UC_OTHER', mp4), '다른 채널이면 기록 없음');
+  // 🗑 v1.0.67 — 지워진 영상 기록(gone)을 같은 파일로 다시 올리면 새 기록에 옛 기록이 prev 로 남는다(이력)
+  ok(YT.markGone('VID_OK_1') === 1 && !YT.findUploaded('UC_TEST_1', mp4), '🗑 markGone → 같은 파일 판정에서 빠진다');
+  r = await YT.uploadVideo({ channelId: 'UC_TEST_1', file: mp4, title: '다시 올림', chunkSize: 256 * 1024, backoff: [0.01] });
+  const again = r.ok && YT.findUploaded('UC_TEST_1', mp4);
+  ok(again && Array.isArray(again.prev) && again.prev.length === 1 && again.prev[0].videoId === 'VID_OK_1' && !!again.prev[0].gone && !again.gone, '🗑 다시 올린 기록에 지워진 옛 기록이 prev 로 남는다');
 
   console.log('\n[4b] 👁 공개 상태(v1.0.58) — 실제로 보낸 값');
   const up = (extra) => YT.uploadVideo({ channelId: 'UC_TEST_1', file: mp4, title: '공개 상태 시험', chunkSize: 256 * 1024, backoff: [0.01], ...extra });
