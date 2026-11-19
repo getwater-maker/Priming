@@ -2064,7 +2064,7 @@ async function _inboxResumeDoing() {
   const IB = require('./core/inbox');
   const notes = IB.listNotes(path.join(IB.inboxDir(), IB.SUB.doing));
   if (!notes.length) return;
-  const uploaded = _uploadedNames(), chans = _inboxChannels(), list = [];
+  const uploaded = _uploadedNames(), chans = _inboxChannels(), list = [], upList = [];
   for (const n of notes) {
     const r = IB.readNote(n.file);
     if (!r.ok) { try { IB.finishNote(n.file, IB.SUB.reject, { reason: r.reason, detail: r.detail, rejectedAt: IB.kst() }); } catch (_) {} continue; }
@@ -2078,8 +2078,9 @@ async function _inboxResumeDoing() {
       try { IB.finishNote(n.file, IB.SUB.done, { doneAt: IB.kst(), result: '성공', upload: 'done', note: '앱을 다시 켠 뒤 업로드 기록으로 확인' }); } catch (_) {}
       continue;
     }
-    list.push({ note: n.file, scriptPath: sp, channel: ch.preset.name, preset: ch.preset, key });
+    (r.note.kind === 'upload' ? upList : list).push({ note: n.file, scriptPath: sp, channel: ch.preset.name, preset: ch.preset, key });
   }
+  if (upList.length) { log(`📥 지난번에 받아 두고 못 올린 편 ${upList.length}편을 다시 업로드 줄에 세웁니다 — ${upList.map((b) => b.key).join(' · ')}`); await _inboxUploadOnly(upList); }
   if (!list.length) return;
   log(`📥 지난번에 받아 두고 끝내지 못한 편 ${list.length}편을 다시 큐에 넣습니다 — ${list.map((b) => b.key).join(' · ')}`);
   await _inboxOpen(list);
@@ -2096,9 +2097,22 @@ async function _inboxTake(notes) {
     isMade: (sp, p) => _scriptMade(sp, byName.get(p.name) || p, uploaded),
     packStatus: (sp) => TS.packagingStatus(sp, { thumbRoot: tRoot }),
   };
+  const upList = [];
+  const upDeps = { channels: chans, allow: AUTO.allow, busy: (sp) => taken.has(_ibKey(sp)) || _inboxBusy(sp), mp4Of: (sp, p) => _inboxMp4Of(sp, byName.get(p.name) || p) };
   for (const n of notes) {
     const r = IB.readNote(n.file);
     if (!r.ok) { if (r.young) continue; _inboxReject(n.file, r.reason, r.detail, r.text); continue; }
+    if (r.note.kind === 'upload') {   // ⬆ 이미 만든 MP4 만 올린다(다시 만들지 않는다 · v1.0.66)
+      const c = IB.checkUploadNote(r.note, upDeps);
+      if (!c.ok) { _inboxReject(n.file, c.reason, c.detail); continue; }
+      let doing;
+      try { doing = IB.moveNote(n.file, IB.SUB.doing, { priming: { acceptedAt: IB.kst(), channel: c.preset.name, version: 'v' + appDiskVersion() } }); }
+      catch (e) { log(`📥 쪽지를 옮기지 못했습니다(${n.name}): ${e.message} — 다음에 다시 봅니다`); continue; }
+      taken.add(_ibKey(r.note.script));
+      upList.push({ note: doing, scriptPath: r.note.script, channel: c.preset.name, preset: c.preset, key: c.key });
+      log(`📥 받음(⬆ 업로드만) — ${c.key} · 채널 「${c.preset.name}」 · ${path.basename(c.mp4)}`);
+      continue;
+    }
     const c = IB.checkNote(r.note, deps);
     if (!c.ok) { _inboxReject(n.file, c.reason, c.detail); continue; }
     let doing;
@@ -2109,11 +2123,62 @@ async function _inboxTake(notes) {
     log(`📥 받음 — ${c.key} · 채널 「${c.preset.name}」 · ${path.basename(r.note.script)}`);
   }
   if (list.length) await _inboxOpen(list);
+  if (upList.length) await _inboxUploadOnly(upList);
+}
+// ⬆ kind "upload" 쪽지 — 올릴 MP4 경로(만들 때와 같은 이름 규칙 · 화이트보드 채널이면 화이트보드 MP4)
+function _inboxMp4Of(sp, preset) {
+  const base = _safeFolder(path.basename(sp).replace(/\.md$/i, ''));
+  if (require('./core/queue-channel').normOutTarget(preset && preset.outTarget) === 'whiteboard') { const wb = wbFinalDir(preset); return path.join(wb || computeOutRoot(sp, preset, 'longform'), base + '_whiteboard.mp4'); }
+  return uploadMp4Path(base, preset, path.join(computeOutRoot(sp, preset, 'longform'), base + '.vrew'));
+}
+// 지금 만들거나 올리는 중인 대본인가(받은 편 진행 중 · 큐에서 만드는 중 · 업로드 줄에 서 있음)
+function _inboxBusy(sp) {
+  if (AUTO.items.has(_ibKey(sp))) return true;
+  const it = S.modes.longform.items.find((x) => _ibKey(x.scriptPath) === _ibKey(sp));
+  return !!(it && (it.status === 'running' || (it.upload && (it.upload.state === 'queued' || it.upload.state === 'uploading'))));
+}
+// ⬆ 업로드만 — 대본을 큐에 열어(화면은 그대로 · 챕터·제목은 만들 때와 같은 길) 이미 만든 MP4 를 업로드 줄에 세운다.
+//   ⛔ 다시 만들지 않는다(it.inboxUpload → _inboxPlan 이 뺀다) · 이미 올린 영상이면 runYtUpload 중복 관문이 마무리만 한다
+//   · 업로드가 끝나면 setItemUpload → _inboxOnUpload → _inboxDone 이 쪽지를 처리됨으로(rec.made 를 미리 찍는다)
+async function _inboxUploadOnly(list) {
+  const IB = require('./core/inbox');
+  const q = S.modes.longform;
+  const prev = q.activeId;
+  const need = list.filter((b) => !q.items.some((x) => _ibKey(x.scriptPath) === _ibKey(b.scriptPath)));
+  if (need.length) await _openScriptEntries(need.map((b) => { const p = P.getPreset(b.channel) || b.preset; return { scriptPath: b.scriptPath, preset: p, settings: _channelItemSettings(p) }; }), { keepView: true });
+  if (prev && q.items.some((x) => x.id === prev)) { q.activeId = prev; syncActiveToS(); }
+  for (const b of list) {
+    const it = q.items.find((x) => _ibKey(x.scriptPath) === _ibKey(b.scriptPath));
+    const fail = (reason, detail) => {
+      try { IB.finishNote(b.note, IB.SUB.reject, { reason, detail: String(detail || '').slice(0, 500), rejectedAt: IB.kst() }); } catch (_) {}
+      AUTO.items.delete(_ibKey(b.scriptPath));
+      AUTO.lastReject = { name: path.basename(b.note), reason, detail: String(detail || '').slice(0, 200), at: IB.kst() };
+      log(`📥 ⬆ 업로드만 — ${b.key} 못 올림: ${reason}${detail ? ' (' + detail + ')' : ''}`);
+    };
+    if (!it || !it.parsed || !it.parsed.projects || !it.parsed.projects.length) { fail('대본 열기 실패', '로그를 보세요'); continue; }
+    try {
+      const base = resolvePreset(b.channel) || b.preset;
+      if (!base || !base.ytChannelId) { fail(IB.REASON.noUploadCh, `채널 「${b.channel}」`); continue; }
+      const preset = { ...base, ytAuto: true };
+      const isWb = require('./core/queue-channel').normOutTarget(preset.outTarget) === 'whiteboard';
+      const ctx = { parsed: it.parsed, scriptPath: it.scriptPath, outRoot: it.outRoot || computeOutRoot(it.scriptPath, preset, 'longform') };
+      const pr = it.parsed.projects[0];
+      const file = ytFileFor(pr, ctx, preset, isWb);
+      if (!fs.existsSync(file)) { fail(IB.REASON.noMp4, file); continue; }
+      it.inbox = true; it.inboxUpload = true; it.upload = null;
+      AUTO.items.set(_ibKey(b.scriptPath), { note: b.note, key: b.key, channel: b.channel, acceptedAt: IB.kst(), made: IB.kst(), upOnly: true });
+      log(`📥 ⬆ 업로드만 — ${b.key} · 「${path.basename(file)}」 → 채널 「${b.channel}」 업로드 줄에 세웁니다(다시 만들지 않음)`);
+      enqueueYtUpload({ file, channelId: preset.ytChannelId, meta: ytMetaFor(pr, ctx, isWb ? null : preset), finish: ytFinishJob(ctx, preset), itemId: it.id });
+    } catch (e) { fail(IB.REASON.upFail, e.message); }
+  }
+  writeWorkspace();
+  _inboxEmit('opened', { queue: queueDTO(), selectId: null, n: list.length });
+  _inboxProgress(true);
 }
 // 자동으로 만들 계획 = 받은 편 중 아직 안 끝난 것(실패·🟥 로 뺀 편 제외) · 큐 순서
 function _inboxPlan() {
   return S.modes.longform.items
-    .filter((it) => it.inbox && AUTO.items.has(_ibKey(it.scriptPath)) && !it.inboxOut && !(it.status === 'done' && it.run && it.run.completed))
+    .filter((it) => it.inbox && !it.inboxUpload && AUTO.items.has(_ibKey(it.scriptPath)) && !it.inboxOut && !(it.status === 'done' && it.run && it.run.completed))   // ⬆ 업로드만 받은 편은 만들지 않는다
     .map((it) => ({ mode: 'longform', id: it.id, settings: it.settings || null }));
 }
 // 🟥 미확인 경험 편은 묻지 않고 뺀다(큐에는 남긴다 — 로이가 확인한 뒤 ⚡ 로 직접) · 쪽지는 거절(사유)로
@@ -2160,7 +2225,10 @@ function _inboxItemEnd(it, result, msg = '') {
 function _inboxDone(it, rec) {
   const IB = require('./core/inbox');
   const up = it.upload || null;
-  try { IB.finishNote(rec.note, IB.SUB.done, { doneAt: IB.kst(), result: '성공', channel: rec.channel, upload: up ? up.state : '없음(채널 자동 업로드 꺼짐)', url: (up && up.url) || '', uploadError: (up && up.error) || '' }); } catch (e) { log(`📥 쪽지를 처리됨으로 옮기지 못했습니다: ${e.message}`); }
+  // 업로드 줄을 안 섰을 때 까닭 — 채널이 꺼졌는가 / 켜졌는데 안 올렸는가(이미 올린 파일 · MP4 없음 · 업로드 채널 미지정 — 로그에 까닭)
+  let _ytOn = false; try { const _p = resolvePreset((it.settings && it.settings.presetName) || rec.channel || null); _ytOn = !!(_p && _p.ytChannelId); } catch (_) {}
+  const noUp = _ytOn ? '없음(업로드채널은 골라져 있음 — 이미 올렸거나 올릴 MP4 가 없음 · 로그 참고)' : '없음(채널에 업로드채널이 없음)';
+  try { IB.finishNote(rec.note, IB.SUB.done, { doneAt: IB.kst(), result: '성공', channel: rec.channel, upload: up ? up.state : noUp, url: (up && up.url) || '', uploadError: (up && up.error) || '' }); } catch (e) { log(`📥 쪽지를 처리됨으로 옮기지 못했습니다: ${e.message}`); }
   AUTO.items.delete(_ibKey(it.scriptPath));
   _inboxFinished(rec, '성공', up && up.state === 'failed' ? '업로드 실패: ' + (up.error || '') : '');
   log(`📥 ${rec.key} 끝 — 쪽지를 처리됨으로 옮겼습니다${up ? ` (업로드 ${up.state})` : ''}`);
@@ -8575,7 +8643,7 @@ function _runBatch(args = {}) { return _withMakePending(Array.isArray(args.plan)
       if (!_pn) log('  ⚠ 채널이 지정되지 않았습니다 — 기본 채널의 목소리로 만들어집니다');
       // 🔀 다른 채널 대본 = 그림 스타일·자막·완성 종류도 그 채널(v0.9.41 · core/queue-channel 한 곳) — 헤더와 같은 채널이면 {}
       const _ov = _auto ? _auto.ov : require('./core/queue-channel').channelOverrides(_pn ? resolvePreset(_pn) : null, common.presetName);
-      if (_auto) log(`  📥 채널 「${_pn}」 설정값 — 이미지 ${ie} · 비디오 ${_ov.videoEngine === 'none' ? 'none' : _ve0} · 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || s.outTarget || 'vrew'}`);
+      if (_auto) log(`  📥 채널 「${_pn}」 설정값 — 이미지 ${ie} · 비디오 ${_ov.videoEngine === 'none' ? 'none' : _ve0} · 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || s.outTarget || 'vrew'} · 업로드 ${_auto.uploadAfter === 'on' ? '켬(채널 업로드채널)' : '끔(채널에 업로드채널 없음)'}`);
       else if (Object.keys(_ov).length) log(`  🔀 채널 「${_pn}」 대본 — 스타일 ${_ov.styleId || '(채널 없음)'} · 자막 ${_ov.captionMaxChars}자 · 완성 ${_ov.outTarget || '(헤더)'} (그 채널 설정)`);
       // 🎬 채널 비디오 「없음」 = 헤더 도구보다 이긴다(끄는 쪽만 · v1.0.14)
       const ve = _ov.videoEngine === 'none' ? 'none' : _ve0;
@@ -8599,7 +8667,8 @@ function _runBatch(args = {}) { return _withMakePending(Array.isArray(args.plan)
         // ✏ 완성물 종류도 **헤더(공통) 우선** — 큐 전체 공통 선택(v0.3.61 정책).
         outTarget: (_ov.outTarget || (common.outTarget != null ? common.outTarget : (s.outTarget || 'vrew'))),
         dry: !!(process.env.PM_UI_SMOKE && common.dry), openVrew: openEach, // openEach=순차 .vrew 열기(단건과 동일). 폴더는 열지 않음 · dry(무음)는 E2E 전용(test:makeview)
-        uploadAfter: (common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null,   // ⬆ 헤더 「완성 후 업로드」
+        // ⬆ 화면 큐 = 헤더 「완성 후 업로드」 하나만(2026-10-14) · 📥 자동 제작 = 그 채널에 업로드채널(ytChannelId)이 있으면 올림(core/inbox.autoItemOpts 한 곳 · v1.0.66)
+        uploadAfter: _auto ? _auto.uploadAfter : ((common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null),
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
       }));
       okN++;

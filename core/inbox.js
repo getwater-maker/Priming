@@ -29,6 +29,9 @@ const REASON = {
   roy: '🟥 미확인 경험',
   notPilot: '시범 채널 아님',
   fail: '제작 실패',
+  noUploadCh: '업로드채널 없음',   // ⬆ kind "upload"
+  noMp4: 'MP4 없음',
+  upFail: '업로드 준비 실패',
 };
 const YOUNG_MS = 15000;   // 막 놓인(쓰는 중일 수 있는) 쪽지를 읽지 못하면 다음 번에 다시 본다
 
@@ -82,7 +85,7 @@ function channelAllowed(name, allow) { const L = _normAllow(allow); return L.inc
 function validateNote(n) {
   if (!n || typeof n !== 'object' || Array.isArray(n)) return 'JSON 객체가 아닙니다';
   if (n.ver !== 1) return `ver 가 1 이 아닙니다(${JSON.stringify(n.ver)})`;
-  if (n.kind !== 'render') return `kind 가 "render" 가 아닙니다(${JSON.stringify(n.kind)})`;
+  if (n.kind !== 'render' && n.kind !== 'upload') return `kind 가 "render"·"upload" 가 아닙니다(${JSON.stringify(n.kind)})`;
   if (typeof n.script !== 'string' || !n.script.trim()) return 'script(대본 경로)가 없습니다';
   if (!/\.md$/i.test(n.script.trim())) return 'script 가 .md 파일이 아닙니다';
   if (!path.isAbsolute(n.script.trim())) return 'script 가 절대 경로가 아닙니다';
@@ -177,6 +180,26 @@ function checkNote(note, d) {
   return { ok: true, preset: ch.preset, key: noteKey(note), thumbA };
 }
 
+/**
+ * ⬆ kind "upload" — 이미 만든 MP4 를 올려 달라(다시 만들지 않는다 · v1.0.66 · 11-19 업로드 없이 끝난 네 편).
+ *   패키징·「이미 만들었음」은 보지 않는다(만든 편이 대상이다). 올릴 MP4 가 있어야 하고 채널에 업로드채널이 있어야 한다.
+ *   이미 올린 영상이면 업로드 관문(runYtUpload 중복 검사)이 다시 올리지 않고 마무리만 한다.
+ * d = { channels, allow?, busy(sp)→bool(지금 만들거나 올리는 중), mp4Of(sp, preset)→경로 }
+ * → { ok:true, preset, key, mp4 } | { ok:false, reason, detail }
+ */
+function checkUploadNote(note, d) {
+  const sp = note.script;
+  if (!_isFile(sp)) return { ok: false, reason: REASON.noScript, detail: sp };
+  const ch = pickChannel(sp, d.channels);
+  if (!ch.ok) return ch;
+  if (d.allow && !channelAllowed(ch.preset.name, d.allow)) return { ok: false, reason: REASON.notPilot, detail: `채널 「${ch.preset.name}」 — 받을 채널: ${_normAllow(d.allow).join(' · ')}` };
+  if (!(typeof ch.preset.ytChannelId === 'string' && ch.preset.ytChannelId.trim())) return { ok: false, reason: REASON.noUploadCh, detail: `채널 「${ch.preset.name}」 — 채널 편집 → 📁 폴더 → ⬆ 업로드에서 고르세요` };
+  if (d.busy(sp)) return { ok: false, reason: REASON.inQueue, detail: '지금 만들거나 올리는 중' };
+  const mp4 = d.mp4Of(sp, ch.preset);
+  if (!mp4 || !_isFile(mp4)) return { ok: false, reason: REASON.noMp4, detail: mp4 || '' };
+  return { ok: true, preset: ch.preset, key: noteKey(note), mp4 };
+}
+
 /** 쪽지를 하위 폴더로 옮긴다(내용에 patch 를 더해) → 새 경로. 같은 이름이 있으면 _2, _3 … */
 function moveNote(file, sub, patch = {}, rawText = null, root = null) {
   let obj;
@@ -207,7 +230,11 @@ function autoItemOpts(preset) {
   const vv = p.videoEngine == null || p.videoEngine === '' ? 'none' : EM.migrateVideo(p.videoEngine).v;
   const videoEngine = vv && vv !== 'flow' ? vv : 'none';
   const ov = p.name ? QC.channelOverrides(p, '\u0000자동') : {};
-  return { imgEngine, videoEngine, ov };
+  // ⬆ 업로드 = 채널 편집 → 📁 폴더 → ⬆ 업로드 칸에 업로드채널(ytChannelId)이 골라져 있으면 올린다 — 자동 제작에는 헤더 체크박스가 없다(요청서 128줄 · v1.0.66)
+  //   ⛔ 옛 값 ytAuto 는 보지 않는다(채널 편집 창에 켬/끔 칸이 없다 — 로이가 볼 수도 바꿀 수도 없다 · 일본 채널이 false 로 남아 있었다)
+  //   ⛔ 화면 큐는 이 값을 쓰지 않는다(헤더 체크박스 하나만 · 2026-10-14 로이) · 공개 상태는 yt-schedule.privacyFor(일부공개·비공개만)
+  const uploadAfter = typeof p.ytChannelId === 'string' && p.ytChannelId.trim() ? 'on' : 'off';
+  return { imgEngine, videoEngine, ov, uploadAfter };
 }
 
 // ── ⑤ progress.json(화면 밖 사본 — 정본은 화면) ──
@@ -226,6 +253,6 @@ function writeProgress(doc) { try { writeJsonAtomic(progressFile(), { ver: 1, at
 
 module.exports = {
   SUB, REASON, YOUNG_MS, baseDir, inboxDir, progressFile, stateFile, kst, writeJsonAtomic,
-  loadState, saveState, channelAllowed, DEFAULT_ALLOW, validateNote, readNote, listNotes, noteKey, pickChannel, thumbAOf, checkNote, moveNote, finishNote,
+  loadState, saveState, channelAllowed, DEFAULT_ALLOW, validateNote, readNote, listNotes, noteKey, pickChannel, thumbAOf, checkNote, checkUploadNote, moveNote, finishNote,
   autoItemOpts, stageOf, writeProgress, STAGE_KO,
 };

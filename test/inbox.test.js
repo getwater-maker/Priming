@@ -17,7 +17,7 @@ const good = { ver: 1, kind: 'render', script: sp, key: '테_1123', at: '2026-11
 // [1] 꼴
 ok(IB.validateNote(good) === '', '[1] 바른 쪽지 통과');
 ok(/ver/.test(IB.validateNote({ ...good, ver: 2 })), 'ver 2 = 꼴 오류');
-ok(/kind/.test(IB.validateNote({ ...good, kind: 'order' })), 'kind 가 render 아님 = 꼴 오류');
+ok(/kind/.test(IB.validateNote({ ...good, kind: 'order' })), 'kind 가 render·upload 아님 = 꼴 오류');
 ok(/절대/.test(IB.validateNote({ ...good, script: 'a\\b.md' })), '상대 경로 = 꼴 오류');
 ok(/\.md/.test(IB.validateNote({ ...good, script: sp.replace(/\.md$/, '.txt') })), '.md 아님 = 꼴 오류');
 ok(/thumbnails/.test(IB.validateNote({ ...good, thumbnails: 'x.png' })), 'thumbnails 가 목록 아님 = 꼴 오류');
@@ -78,6 +78,20 @@ ok(rs.reason === '패키징 미완' && /고정댓글·썸네일 그림 A/.test(r
 ok(IB.checkNote(N({ packaging: undefined, thumbnails: undefined }), D()).ok, '쪽지에 경로가 없어도 판정 한 곳(packStatus)이 통과면 받는다');
 ok(IB.checkNote(N(), D({ inQueue: () => true })).reason === '이미 큐에 있음', '이미 큐에 있음');
 ok(IB.checkNote(N(), D({ isMade: () => true })).reason === '이미 만들었음', '이미 만들었음');
+// [5b] ⬆ kind "upload" — 이미 만든 MP4 만 올린다(v1.0.66) · 「이미 만들었음」·패키징은 보지 않는다
+{ const mp4 = w(path.join(TMP, 'up', '[테_1123] 좋은 편.mp4'), 'x');
+  const chU = { ...chA, ytChannelId: 'UCxyz' };
+  const UD = (o = {}) => ({ channels: [chU], busy: () => false, mp4Of: () => mp4, ...o });
+  const UN = (o = {}) => ({ ver: 1, kind: 'upload', script: sp, ...o });
+  ok(IB.validateNote(UN()) === '', '[5b] kind "upload" 쪽지 꼴 통과');
+  const u1 = IB.checkUploadNote(UN(), UD());
+  ok(u1.ok && u1.preset.name === '가' && u1.key === '테_1123' && u1.mp4 === mp4, '업로드 쪽지 받음(채널·열쇠·MP4)');
+  ok(IB.checkUploadNote(UN({ script: sp.replace('좋은', '없는') }), UD()).reason === '대본 파일 없음', '업로드 — 대본 파일 없음');
+  ok(IB.checkUploadNote(UN(), UD({ channels: [chA] })).reason === '업로드채널 없음', '업로드 — 채널에 업로드채널 없으면 거절');
+  ok(IB.checkUploadNote(UN(), UD({ channels: [{ ...chA, ytChannelId: ' ' }] })).reason === '업로드채널 없음', '업로드 — 빈칸 업로드채널 = 없음');
+  ok(IB.checkUploadNote(UN(), UD({ mp4Of: () => mp4 + 'x' })).reason === 'MP4 없음', '업로드 — MP4 없으면 거절(다시 만들지 않는다)');
+  ok(IB.checkUploadNote(UN(), UD({ busy: () => true })).reason === '이미 큐에 있음', '업로드 — 만들거나 올리는 중이면 거절');
+  ok(IB.checkUploadNote(UN(), UD({ allow: ['01_로이의고전이야기'] })).reason === '시범 채널 아님', '업로드 — 받을 채널 밖이면 거절'); }
 const np = IB.checkNote(N(), D({ allow: ['01_로이의고전이야기'] }));
 ok(np.reason === '시범 채널 아님' && /가/.test(np.detail), '받을 채널 목록에 없으면 = 시범 채널 아님 — ' + np.detail);
 ok(IB.checkNote(N(), D({ allow: ['가'] })).ok && IB.checkNote(N({ packaging: pack + 'x' }), D({ allow: ['라'] })).reason === '시범 채널 아님', '목록에 있으면 받는다 · 시범 판정이 패키징보다 먼저');
@@ -113,6 +127,12 @@ const o1 = IB.autoItemOpts({ name: '가', imgEngine: 'comfy', styleLong: 'ink', 
 ok(o1.imgEngine === 'kie:qwen-2-1' && o1.videoEngine === 'none' && o1.ov.styleId === 'ink' && o1.ov.outTarget === 'mp4' && o1.ov.captionMaxChars === 18, '[8] 옛 이미지 도구 → AI 이미지 · 비디오 없으면 「없음」 · 스타일·완성·자막 글자 = 채널 — ' + JSON.stringify(o1));
 ok(IB.autoItemOpts({ name: '가', videoEngine: 'grok' }).videoEngine === 'none' && IB.autoItemOpts({ name: '가', videoEngine: 'kie:minimax-h3' }).videoEngine === 'kie:minimax-h3' && IB.autoItemOpts({ name: '가', videoEngine: 'none' }).ov.videoEngine === 'none', '비디오: 지운 도구 = 없음 · AI 영상 = 그대로 · 「없음」 = 끔');
 ok(IB.autoItemOpts({ name: '가', imgEngine: 'local:qwen-2-1' }).imgEngine === 'local:qwen-2-1', '관리자 로컬 Qwen 은 그대로');
+// ⬆ 업로드 = 채널 편집의 업로드채널(ytChannelId)이 있으면 'on'(v1.0.66 · 2026-11-19 네 편이 MP4 에서 멈춘 사고) — 옛 값 ytAuto 는 보지 않는다(화면에 칸이 없다)
+ok(IB.autoItemOpts({ name: '고전', ytAuto: true, ytChannelId: 'UCaaa', ytPrivacy: 'unlisted' }).uploadAfter === 'on', '[8b] 업로드채널 있음 → uploadAfter on');
+ok(IB.autoItemOpts({ name: '일본', ytAuto: false, ytChannelId: 'UCbbb', ytPrivacy: 'unlisted' }).uploadAfter === 'on', '옛 ytAuto false(일본) 여도 업로드채널이 골라져 있으면 on');
+ok(IB.autoItemOpts({ name: '가', ytAuto: true }).uploadAfter === 'off' && IB.autoItemOpts({ name: '가', ytChannelId: '  ' }).uploadAfter === 'off' && IB.autoItemOpts({ name: '가' }).uploadAfter === 'off' && IB.autoItemOpts(null).uploadAfter === 'off', '업로드채널 없음·빈칸 → off(ytAuto 만 켜져도 올리지 않는다)');
+{ const YS = require(path.join(ROOT, 'core', 'yt-schedule'));
+  ok(['unlisted', 'private', 'public', undefined, ''].every((v) => ['unlisted', 'private'].includes(YS.privacyFor({ ytAuto: true, ytPrivacy: v }, null))), '자동 업로드 공개 상태 = 일부공개·비공개뿐(⛔ public)'); }
 
 // [9] progress
 const snap = { stages: { tts: { state: 'done' }, image: { state: 'run' }, video: { state: 'wait' }, out: { state: 'wait' } }, sent: { done: 9, total: 9 }, image: { done: 3, total: 12 }, video: { done: 0, total: 0 } };
@@ -129,6 +149,16 @@ const iAuto = rb.indexOf('if (common.auto) {'), iDlg = rb.indexOf("title: '🛫 
 ok(iAuto > 0 && iDlg > iAuto && /else if \(!\(process\.env\.PM_UI_SMOKE && common\.dry\)\)/.test(rb.slice(iAuto, iDlg)), '[10] 자동 run 은 「만들기 전 점검」 창 앞에서 갈라진다(묻지 않는다)');
 ok(/ipcMain\.handle\('run-batch', \(_e, args = \{\}\) => _runBatch\(/.test(M), '⚡ 만들기(IPC)와 자동 제작이 같은 _runBatch');
 ok(/if \(i >= plan\.length\) \{[\s\S]{0,200}args\.extend/.test(rb), '계획이 끝나면 extend 로 이어 받는다');
+ok(/uploadAfter: _auto \? _auto\.uploadAfter : \(\(common\.uploadAfter === 'on' \|\| common\.uploadAfter === 'off'\) \? common\.uploadAfter : null\)/.test(rb), '⬆ 자동 제작 = 채널 업로드채널 · 화면 큐 = 헤더 체크박스만(10-14 규칙 그대로)');
+{ const tk = M.slice(M.indexOf('async function _inboxTake('), M.indexOf('function _inboxMp4Of('));
+  ok(tk.indexOf("r.note.kind === 'upload'") > 0 && tk.indexOf("r.note.kind === 'upload'") < tk.indexOf('IB.checkNote(r.note, deps)'), '⬆ 업로드 쪽지는 만들기 판정(checkNote) 전에 갈라진다');
+  const uo = M.slice(M.indexOf('async function _inboxUploadOnly('), M.indexOf('// 자동으로 만들 계획'));
+  ok(uo.length > 200 && !/runMakeAllCore|_runBatch\(|makeRun\(/.test(uo), '업로드만 = 제작 길을 부르지 않는다');
+  ok(/made: IB\.kst\(\)[\s\S]{0,200}enqueueYtUpload\(\{[^}]*itemId: it\.id/.test(uo), '업로드만 = rec.made 를 먼저 찍고 그 항목 id 로 업로드 줄(끝나면 쪽지를 처리됨으로)');
+  ok(/it\.inbox && !it\.inboxUpload && AUTO\.items\.has/.test(M), '_inboxPlan 은 업로드만 받은 편을 만들지 않는다');
+  ok(/r\.note\.kind === 'upload' \? upList : list/.test(M), '앱을 다시 켜면 진행중 업로드 쪽지도 다시 업로드 줄에'); }
+{ const rm = M.slice(M.indexOf('async function runMakeAllCore('), M.indexOf('async function runMakeAllCore(') + 4000);
+  ok(/preset = \{ \.\.\.preset, ytAuto: uploadAfter === 'on' \}/.test(rm), 'runMakeAllCore 는 넘겨받은 uploadAfter 만 본다(채널 ytAuto 를 직접 읽지 않는다)'); }
 ok(/if \(!opts\.keepView\) WORLD\.setView\('longform'\)/.test(M), '받은 편 열기는 화면 세계를 바꾸지 않는다(keepView)');
 ok(!/require\('\.\/core\/inbox'\)/.test(M.slice(0, M.indexOf('function _openScriptEntries'))), 'core/inbox 를 맨 위에서 읽지 않는다(판매판엔 파일이 없다)');
 const iLock = B.indexOf('requestSingleInstanceLock'), iUpd = B.indexOf("require('./light-updater').applyUpdates()"), iUD = B.indexOf("app.setPath('userData'");

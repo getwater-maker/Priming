@@ -73,10 +73,15 @@ async function launch(args = [], env = ENV) {
     fs.mkdirSync(INBOX, { recursive: true });
     A = await launch();
     const add = await A.win.evaluate(async ({ name, dir, out }) => {
-      try { try { await window.api.addPreset({ name }); } catch (_) {} await window.api.savePreset({ name, patch: { outputFolder: out, outLong: out, scriptFolder: dir, ytAuto: false } }); return 'ok'; } catch (e) { return e.message; }
+      try { try { await window.api.addPreset({ name }); } catch (_) {} await window.api.savePreset({ name, patch: { outputFolder: out, outLong: out, scriptFolder: dir, ytAuto: false, ytChannelId: '' } }); return 'ok'; } catch (e) { return e.message; }
     }, { name: CH, dir: CHDIR, out: OUT });
     ok(add === 'ok', '⓪ 임시 채널: ' + add);
-    await A.win.evaluate(async ({ name, dir, out }) => { try { await window.api.addPreset({ name }); } catch (_) {} await window.api.savePreset({ name, patch: { outputFolder: out, outLong: out, scriptFolder: dir, ytAuto: false } }); }, { name: CH2, dir: CHDIR2, out: OUT });
+    await A.win.evaluate(async ({ name, dir, out }) => { try { await window.api.addPreset({ name }); } catch (_) {} await window.api.savePreset({ name, patch: { outputFolder: out, outLong: out, scriptFolder: dir, ytAuto: false, ytChannelId: '' } }); }, { name: CH2, dir: CHDIR2, out: OUT });
+    // 🛡 자동 제작은 업로드채널이 있으면 올린다(v1.0.66) — 시험 채널이 복사 원본의 진짜 업로드채널을 물려받았으면 여기서 멈춘다
+    { const chk = await A.win.evaluate(async (names) => { const out = {}; for (const nm of names) { try { const p = await window.api.getPresetDetail(nm); out[nm] = p ? (p.ytChannelId || '') : '?없음'; } catch (e) { out[nm] = '?' + e.message; } } return out; }, [CH, CH2]);
+      const leak = Object.values(chk).some((v) => v);
+      ok(!leak, '⓪ 시험 채널에 업로드채널 없음(진짜 유튜브에 올리지 않게) ' + JSON.stringify(chk));
+      if (leak) throw new Error('시험 채널에 업로드채널이 남아 있어 멈춥니다'); }
     w(path.join(HOME, 'auto-make.json'), JSON.stringify({ paused: false, allowChannels: [CH] }));   // 시험 채널만 받는다(기본은 고전 하나)
     await A.app.close(); A = null;
 
@@ -100,6 +105,9 @@ async function launch(args = [], env = ENV) {
     const e2nd = w(path.join(CHDIR2, '2026_11', '[테' + tag + '_1129] 다른채널.md'), '# x' + NL);
     note(null, { script: e2nd, key: 'pilot' }, 'notpilot.json');
     const f2 = note(e2);
+    // ⬆ kind "upload"(v1.0.66) — 시험 채널엔 업로드채널이 없다 → 만들지 않고 「업로드채널 없음」 으로 거절(⛔ 진짜 유튜브 업로드는 시험하지 않는다)
+    const eUp = episode('1130');
+    note(eUp, { kind: 'upload' }, 'upnoch.json');
     void f1; void fDup; void fKind; void fNoScript; void f2;
 
     const T0 = Date.now();
@@ -124,6 +132,8 @@ async function launch(args = [], env = ENV) {
     ok(why(/^nochannel/) === '채널 없음', '채널 없음');
     ok(why(/^notpilot/) === '시범 채널 아님', '받을 채널 목록에 없는 채널 = 시범 채널 아님 — ' + ((R.find((x) => /^notpilot/.test(x.f)) || {}).detail || ''));
     ok(why(/^dup_/) === '이미 큐에 있음', '같은 대본 두 번째 쪽지 = 이미 큐에 있음');
+    ok(why(/^upnoch/) === '업로드채널 없음', '⬆ 업로드 쪽지 — 채널에 업로드채널이 없으면 거절(만들지 않음)');
+    ok(!fs.existsSync(path.join(OUT, eUp.name, eUp.name + '.vrew')), '⬆ 업로드 쪽지 편은 만들지 않았다');
     ok(listDir(INBOX).length === 0, '받은 편지함 바로 아래가 비었다(모두 처리됨·거절로)');
     const boxes = await A.app.evaluate(() => global.__boxes || []);
     ok(!boxes.length, '자동 제작 중 묻는 창이 하나도 없었다: [' + boxes.join(' | ') + ']');
