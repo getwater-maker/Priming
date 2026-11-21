@@ -9817,24 +9817,19 @@ ipcMain.handle('apply-range-all', (_e, args = {}) => {
 });
 // 💰 작업큐(롱폼) 전체의 **남은** 이미지·영상 수 — 항목마다 메모리에 읽혀 있는 대본(it.parsed)으로 센다. 단가·원화 계산은 화면(core/media-cost).
 //   이미지 = 프롬프트 있고 그림·영상이 아직 없는 그룹(앞 그림이 이어지는 그룹 제외) · 영상 = 그 대본의 방식(vidSel · 기본 도입부 전체) 안에서 영상 없는 그룹.
+//   🐢 v1.0.68 — 셈은 `core/queue-media-count`(비동기 stat 한 번씩 · 대본마다 양보) · ⛔ 여기서 동기 fs 로 되돌리지 말 것
+//     (큐 28편에서 5초마다 3초씩 main 이 멈춰 「응답 없음」으로 창이 닫혔다 — 2026-11-21) · 도는 셈이 있으면 그 결과를 같이 받는다.
+const _qMediaRun = { p: null, key: '' };
 ipcMain.handle('queue-media-cost', (_e, args = {}) => {
   const q = S.modes.longform; const wantVid = !!args.videoEngine && args.videoEngine !== 'none';
-  const items = [];
-  for (const it of ((q && q.items) || [])) {
-    const name = path.basename(it.scriptPath || '').replace(/\.md$/i, '');
-    if (!it.parsed || !it.parsed.projects) { items.push({ id: it.id, name, img: null, vid: null }); continue; }
-    let img = 0, vid = 0;
-    for (const pr of it.parsed.projects) {
-      try { require('./core/visual-span').markCovered(pr, hasVisual); } catch {}
-      for (const g of pr.groups) if (g.imagePrompt && g.imagePrompt.trim() && !hasVisual(g) && !g._covered) img++;
-      if (wantVid) {
-        const hit = VSel.matcher(pr.groups, VSel.normSel((it.settings || {}).vidSel) || 'intro', null, null);
-        for (const g of pr.groups) if (hit(g.num) && !(g.videoPath && fs.existsSync(g.videoPath))) vid++;
-      }
-    }
-    items.push({ id: it.id, name, img, vid });
-  }
-  return { items };
+  const key = wantVid ? 'v' : 'i';
+  if (_qMediaRun.p && _qMediaRun.key === key) return _qMediaRun.p;
+  const p = require('./core/queue-media-count').countQueueMedia(((q && q.items) || []).slice(), {
+    wantVid, markCovered: require('./core/visual-span').markCovered,
+    matcher: VSel.matcher, normSel: VSel.normSel, basename: (s) => path.basename(s),
+  }).finally(() => { if (_qMediaRun.p === p) _qMediaRun.p = null; });
+  _qMediaRun.p = p; _qMediaRun.key = key;
+  return p;
 });
 ipcMain.handle('set-queue-settings', (_e, args = {}) => {
   const it = activeItem();

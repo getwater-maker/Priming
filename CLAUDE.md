@@ -160,6 +160,7 @@
 - 🌐 **롱폼/출판은 「세계」가 따로다**(v0.5.103 · `core/world-ctx.js`): `S.parsed·scriptPath·outRoot·preset·mode` 는 **호출이 시작된 세계**의 칸을 읽는다(AsyncLocalStorage). 새 IPC 는 기본이 **롱폼**, `book-*`·`open-book-*` 는 출판, 큐·모드·폴더처럼 화면을 따를 것만 `VIEW_FOLLOW_CHANNELS` 에 넣는다(렌더러가 여러 번 나눠 부르는 제작 루프는 `__world` 를 명시). 화면으로 DTO 를 밀 땐 `pushDtoUpdate`(보는 세계만 보냄)를 쓰고, 렌더러 `setDto` 는 다른 세계 DTO 를 버린다. ⛔ `S.mode = …` 를 세계 전환 용도로 새로 쓰지 말 것(열기 핸들러는 `WORLD.setView`). `npm run test:world`.
 - 🩹 **화면(렌더러) 프로세스가 죽으면 main `_guardRenderer`(`core/renderer-guard`)가 이유·화면 메모리를 로그에 적고 다시 띄운다**(v1.0.47 · 제작 도중 백지 사고 · 덤프 `~/.priming-maker/electron/Crashpad`) — 다시 띄운 화면은 `list-queue` 로 상태를 되받으므로 ⛔ 화면만 가진 상태를 새로 만들지 말 것 · `test:rendguard`.
 - 🔴 **`pushDtoUpdate`(전체 DTO 생성·전송)를 await 없는 반복 안에서 부르지 않는다** — 몰아서 끝에 한 번, 또는 1초 간격(`TTS_PROGRESS_GAP_MS`). 통합본 3,534문장 건너뛰기에서 응답없음(v0.5.84).
+- 🐢 **화면이 자주 부르는 IPC(dto·큐가 바뀔 때마다)는 큐 전체를 동기 fs 로 훑지 않는다** — 💰 큐 비용 셈은 `core/queue-media-count`(비동기 stat 한 번씩 · 대본마다 양보 · 겹친 호출은 한 번에)(v1.0.68 · 큐 28편에서 5초마다 3초씩 얼어 「응답 없음」으로 창이 닫혔다 · `test:qmedia`).
 - 🔴 **메인 프로세스에서 동기 자식 프로세스(`execFileSync`) 금지** — 이미지 검사로 앱이 54초 얼었다. 검사는 비동기 + 결과 기억(`_visMemo`) + 동시 4개.
 - G: 는 구글드라이브 스트리밍 — 순간 언마운트(16초)가 실제로 있었다. 쓰기·mkdir 은 `P.retryFs`(비동기 1·2·4·8·15초). ENOENT 도 일시 장애로 본다(쓰기 경로에서만).
 - 밖에서 .md 가 바뀌면 1.5초 stat 감시로 자동 다시 읽기(`checkExternalScriptChange` — 작업 중엔 미룸, 🔴 비동기 판정 사이 대본이 바뀌었는지 `same()` 을 네 번 확인). 작업본 이어받기 판정은 **문장 시퀀스 비교 + `hashVer` 가 찍힌 해시만 신뢰**(savedAt 금지).
