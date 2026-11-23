@@ -33,7 +33,8 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     ok(unpk.every((x) => x.d && !x.c), '패키징 미완 줄은 고를 수 없다');
     if (process.env.SHOT) await win.locator('[data-testid="today-pick"]').screenshot({ path: process.env.SHOT });
     const addOn = !(await win.locator('[data-testid="today-add"]').isDisabled());
-    ok(rows > 0 ? addOn : !addOn, '고른 대본이 있을 때만 「작업큐에 넣기」가 눌린다');
+    const anyOn = await win.evaluate(() => [...document.querySelectorAll('[data-testid="today-pick"] .today-row input')].some((i) => i.checked));
+    ok(anyOn ? addOn : !addOn, '고른 대본이 있을 때만 「작업큐에 넣기」가 눌린다');
     await win.click('[data-testid="today-pick"] button:has-text("취소")');
     await win.waitForTimeout(200);
     ok(!(await win.locator('[data-testid="today-pick"]').count()), '취소로 닫힌다');
@@ -55,7 +56,18 @@ const ok = (c, m) => { if (c) { pass++; console.log(`  ✓ ${m}`); } else { fail
     await win.click('[data-testid="today-pick"] .today-all');   // 모두 선택 — 미완은 그대로 꺼짐
     ok(await win.evaluate(() => { const i = [...document.querySelectorAll('[data-testid="today-pick"] .today-row input')]; return i[0].checked && !i[1].checked; }), '「모두 선택」도 미완은 고르지 않는다');
     if (process.env.SHOT) await win.locator('[data-testid="today-pick"]').screenshot({ path: process.env.SHOT.replace(/\.png$/, '_2.png') });
-    await win.click('[data-testid="today-pick"] button:has-text("취소")');
+    // ③ 📦 「패키징 없이도 넣기」(v1.0.69) — 기본 꺼짐 · 켜면 미완도 골라지고 noPack 이 main 으로 간다
+    ok(!(await win.locator('[data-testid="today-nopack"] input').isChecked()), '「패키징 없이도 넣기」 기본 = 꺼짐');
+    await win.click('[data-testid="today-nopack"] input');
+    ok(await win.evaluate(() => { const i = [...document.querySelectorAll('[data-testid="today-pick"] .today-row input')]; return i[0].checked && i[1].checked && !i[1].disabled; }), '켜면 미완 대본도 골라진다');
+    await app.evaluate(({ ipcMain }) => { ipcMain.removeHandler('open-scripts-list'); ipcMain.handle('open-scripts-list', (_e, a) => { global.__osl = a; return null; }); });
+    await win.click('[data-testid="today-add"]');
+    await win.waitForTimeout(300);
+    const osl = await app.evaluate(() => global.__osl || null);
+    ok(osl && osl.noPack === true && osl.items.length === 2, '넣기 = 두 편 + noPack:true 로 main 에 — ' + JSON.stringify(osl));
+    const M = require('fs').readFileSync(require('path').join(__dirname, '..', 'main.js'), 'utf8');
+    ok(/if \(!pk\.ok && !noPack\)/.test(M) && /ytAuto: uploadAfter === 'on' && !opts\.noUpload/.test(M) && /noUpload: _noUp/.test(M), 'main: 기본은 미완을 막고 · 미완으로 넣은 대본은 업로드하지 않는다');
+    if (await win.locator('[data-testid="today-pick"]').count()) await win.click('[data-testid="today-pick"] button:has-text("취소")');
   } finally { await app.close(); }
   console.log(`\n${fail ? '❌' : '✅'} 오늘 대본 E2E ${pass}/${pass + fail}`);
   process.exit(fail ? 1 : 0);

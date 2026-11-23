@@ -119,8 +119,8 @@ try {
   ok(res.items.some((x) => x.pack.ok) && res.items.some((x) => !x.pack.ok), '완료·미완이 한 목록에 함께 나온다(미완은 화면이 고를 수 없게)');
 } finally { fs.rmSync(root5, { recursive: true, force: true }); }
 // 연결 — main 이 큐에 넣기 전에 다시 막는다 · 화면은 pack.ok 로만 고르게 한다(다시 판정하지 않음)
-ok(/open-scripts-list[\s\S]{0,900}packagingStatus\(x\.path, \{ thumbRoot: thumbRoot\(\) \}\)[\s\S]{0,200}if \(!pk\.ok\)[^\n]*continue/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다');
-ok(/const todayPackOk = \(x\) => !!\(x && x\.pack && x\.pack\.ok\)/.test(APP) && /disabled=\{!pk\}/.test(APP) && /tp\.sel\[x\.path\] && todayPackOk\(x\)/.test(APP), '화면: 미완은 고를 수 없고 넣을 때도 거른다');
+ok(/open-scripts-list[\s\S]{0,1100}packagingStatus\(x\.path, \{ thumbRoot: thumbRoot\(\) \}\)[\s\S]{0,200}if \(!pk\.ok && !noPack\)[^\n]*continue/.test(MAIN) && /const noPack = !!args\.noPack;/.test(MAIN), 'main open-scripts-list: 패키징 미완이면 넣지 않는다(「패키징 없이도 넣기」를 켠 때만 넣는다 · v1.0.69)');
+ok(/const todayPackOk = \(x\) => !!\(x && x\.pack && x\.pack\.ok\)/.test(APP) && /const todayUsable = \(tp, x\) => todayPackOk\(x\) \|\| !!\(tp && tp\.noPack\)/.test(APP) && /disabled=\{!use\}/.test(APP) && /tp\.sel\[x\.path\] && todayUsable\(tp, x\)/.test(APP) && /noPack: false, sel:/.test(APP), '화면: 미완은 고를 수 없고 넣을 때도 거른다(「패키징 없이도 넣기」 기본 꺼짐 · 켠 때만)');
 ok(!/packagingStatus|findPackagingFile/.test(APP), '화면이 패키징을 따로 판정하지 않는다');
 ok(/today-scripts-scan[\s\S]{0,900}findToday\([^\n]*\{ thumbRoot: thumbRoot\(\) \}\)/.test(MAIN), 'main 찾기도 썸네일 폴더를 넘긴다');
 

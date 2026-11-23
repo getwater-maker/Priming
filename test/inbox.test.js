@@ -166,7 +166,7 @@ ok(/uploadAfter: _auto \? _auto\.uploadAfter : \(\(common\.uploadAfter === 'on' 
   ok(/it\.inbox && !it\.inboxUpload && AUTO\.items\.has/.test(M), '_inboxPlan 은 업로드만 받은 편을 만들지 않는다');
   ok(/r\.note\.kind === 'upload' \? upList : list/.test(M), '앱을 다시 켜면 진행중 업로드 쪽지도 다시 업로드 줄에'); }
 { const rm = M.slice(M.indexOf('async function runMakeAllCore('), M.indexOf('async function runMakeAllCore(') + 4000);
-  ok(/preset = \{ \.\.\.preset, ytAuto: uploadAfter === 'on' \}/.test(rm), 'runMakeAllCore 는 넘겨받은 uploadAfter 만 본다(채널 ytAuto 를 직접 읽지 않는다)'); }
+  ok(/preset = \{ \.\.\.preset, ytAuto: uploadAfter === 'on'( && !opts\.noUpload)? \}/.test(rm), 'runMakeAllCore 는 넘겨받은 uploadAfter 만 본다(채널 ytAuto 를 직접 읽지 않는다)'); }
 ok(/if \(!opts\.keepView\) WORLD\.setView\('longform'\)/.test(M), '받은 편 열기는 화면 세계를 바꾸지 않는다(keepView)');
 ok(!/require\('\.\/core\/inbox'\)/.test(M.slice(0, M.indexOf('function _openScriptEntries'))), 'core/inbox 를 맨 위에서 읽지 않는다(판매판엔 파일이 없다)');
 const iLock = B.indexOf('requestSingleInstanceLock'), iUpd = B.indexOf("require('./light-updater').applyUpdates()"), iUD = B.indexOf("app.setPath('userData'");

@@ -1986,19 +1986,26 @@ ipcMain.handle('today-scripts-scan', () => {
 });
 ipcMain.handle('open-scripts-list', async (_e, args = {}) => {
   const list = Array.isArray(args.items) ? args.items : [];
-  const entries = [];
+  const noPack = !!args.noPack;   // 📦 「패키징 없이도 넣기」(v1.0.69 · 로이 2026-11-24 — 음성·그림을 먼저 만들 때) · 기본 = 패키징 끝난 대본만
+  const entries = [], unpacked = [];
   for (const x of list) {
     const preset = P.getPreset(x && x.presetName);
     if (!preset || !x.path || !fs.existsSync(x.path)) { log(`⚠ 대본을 열 수 없습니다 — ${x && x.path ? path.basename(x.path) : '(경로 없음)'}`); continue; }
     // 📦 패키징(+ 🖼 썸네일 그림 · v1.0.56)이 끝난 대본만 큐에 넣는다(v1.0.55 · 로이 2026-11-17) — 화면이 보내도 여기서 다시 본다(판정 = today-scripts.packagingStatus 한 곳)
     const pk = require('./core/today-scripts').packagingStatus(x.path, { thumbRoot: thumbRoot() });
-    if (!pk.ok) { log(`📦 패키징 미완이라 큐에 넣지 않습니다 — ${path.basename(x.path)} (빠진 것: ${pk.missing.join('·')})`); continue; }
+    if (!pk.ok && !noPack) { log(`📦 패키징 미완이라 큐에 넣지 않습니다 — ${path.basename(x.path)} (빠진 것: ${pk.missing.join('·')})`); continue; }
+    if (!pk.ok) unpacked.push(x.path);
     entries.push({ scriptPath: x.path, preset, settings: _channelItemSettings(preset) });
   }
   if (!entries.length) return null;
   log(`📅 오늘 대본 ${entries.length}편을 작업큐에 넣습니다 — 대본마다 자기 채널로 만듭니다`);
   const okN = await _openScriptEntries(entries);
   if (!okN) return null;
+  if (unpacked.length) {   // 이 항목들은 ⚡ 만들기를 해도 업로드하지 않는다(_runBatch 가 그때 패키징을 다시 본다)
+    for (const it of S.modes.longform.items) if (unpacked.includes(it.scriptPath)) it.noPack = true;
+    writeWorkspace();
+    log(`📦 패키징 미완 ${unpacked.length}편도 넣었습니다 — 🎤 TTS+이미지로 음성·그림을 먼저 만들 수 있습니다(⚡ 만들기를 해도 패키징이 끝나기 전에는 업로드하지 않습니다)`);
+  }
   log(`📅 ${okN}/${entries.length}편 열림 — 「⚡ 만들기」로 큐 순서대로 제작합니다`);
   return { dto: P.toDTO(S.parsed), scriptPath: S.scriptPath, outRoot: S.outRoot, queue: queueDTO(), mode: S.mode };
 });
@@ -7475,7 +7482,7 @@ let _crashInfo = { crashed: false, prev: null };
 function serializeQueue() {
   const ser = (mode) => {
     const q = S.modes[mode];
-    return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle', run: it.run || null, upload: it.upload || null })) };
+    return { activeId: q.activeId, items: q.items.map((it) => ({ id: it.id, scriptPath: it.scriptPath, settings: it.settings || null, status: it.status || 'idle', run: it.run || null, upload: it.upload || null, ...(it.noPack ? { noPack: true } : {}) })) };
   };
   return { version: 1, mode: S.mode, longform: ser('longform'), book: ser('book') };
 }
@@ -7516,7 +7523,8 @@ function applyWorkspace(ws, opts = {}) {
           for (const pr of parsed.projects) pr.mode = mode;
           const outRoot = computeOutRoot(wi.scriptPath, preset, mode);
           const it = { id: newItemId(), parsed, scriptPath: wi.scriptPath, outRoot, settings: wi.settings || null,
-            status: (wi.status === 'running' || (wi.status === 'done' && !wi.run?.completed) ? 'interrupted' : (wi.status || 'idle')), ...restoreRunInfo(wi) }; // 중단된 실행·완료 확인 기록 없는 옛 완료건은 재확인
+            status: (wi.status === 'running' || (wi.status === 'done' && !wi.run?.completed) ? 'interrupted' : (wi.status || 'idle')), ...restoreRunInfo(wi) };
+          if (wi.noPack) it.noPack = true;   // 📦 패키징 없이 넣은 대본(v1.0.69) — 되살려도 업로드 막기가 따라온다 // 중단된 실행·완료 확인 기록 없는 옛 완료건은 재확인
           q.items.push(it); restored++;
           if (wi.id === wq.activeId) activeNewId = it.id;
         } catch (e) { log(`큐 항목 복원 실패(${path.basename(wi.scriptPath)}): ${e.message}`); }
@@ -8164,7 +8172,7 @@ async function runMakeAllBody(opts = {}) {
   let preset = P.getPreset(presetName);
   // ⬆ 헤더 「완성 후 업로드」(v0.8.7) — 'on'/'off' 면 채널의 자동 업로드 설정보다 이긴다(null = 채널 설정대로) · 업로드 대상 채널은 늘 채널의 업로드채널
   // 🔴 업로드 여부는 헤더 체크박스 하나만 정한다(2026-10-14 로이) — 채널의 ytAuto 는 읽지 않는다(체크 안 했거나 값이 없으면 올리지 않음)
-  if (preset) preset = { ...preset, ytAuto: uploadAfter === 'on' };
+  if (preset) preset = { ...preset, ytAuto: uploadAfter === 'on' && !opts.noUpload };   // 📦 noUpload = 패키징 없이 넣은 대본(v1.0.69)
   // TTS 는 정속(1.0) — speed 값은 Vrew 배속(playbackRate)으로만 사용
   S.preset = preset;
   let ttsMgr = null;
@@ -8680,6 +8688,9 @@ function _runBatch(args = {}) { return _withMakePending(Array.isArray(args.plan)
       // 🎬 채널 비디오 「없음」 = 헤더 도구보다 이긴다(끄는 쪽만 · v1.0.14)
       const ve = _ov.videoEngine === 'none' ? 'none' : _ve0;
       if (ve === 'none' && _ve0 !== 'none') log(`  🎬 채널 「${_pn}」 비디오 = 없음 — 이 대본은 영상을 만들지 않습니다(헤더 도구 무시)`);
+      // 📦 패키징 없이 넣은 대본(v1.0.69) — 지금 다시 보고, 아직 미완이면 업로드만 하지 않는다(제목·설명·썸네일이 없는 영상이 올라가지 않게)
+      let _noUp = false;
+      if (it.noPack) { const _pk = require('./core/today-scripts').packagingStatus(it.scriptPath, { thumbRoot: thumbRoot() }); if (_pk.ok) it.noPack = false; else { _noUp = true; log(`  📦 패키징 미완으로 넣은 대본 — 업로드는 하지 않습니다(빠진 것: ${_pk.missing.join('·')})`); } }
       const _rg = _itemRange(s, it.parsed);
       if (ve !== 'none') log(`  🎬 영상 범위 G${_rg.fromNum}~G${_rg.toNum} (${_rg.src})`);
       await makeRun(it, () => runMakeAllCore({   // 🎬 제작 칸 — 화면은 사람이 고른 대본에 그대로 둔다
@@ -8702,6 +8713,7 @@ function _runBatch(args = {}) { return _withMakePending(Array.isArray(args.plan)
         // ⬆ 화면 큐 = 헤더 「완성 후 업로드」 하나만(2026-10-14) · 📥 자동 제작 = 그 채널에 업로드채널(ytChannelId)이 있으면 올림(core/inbox.autoItemOpts 한 곳 · v1.0.66)
         uploadAfter: _auto ? _auto.uploadAfter : ((common.uploadAfter === 'on' || common.uploadAfter === 'off') ? common.uploadAfter : null),
         _fromQueue: true,   // 🟥 미확인 경험이면 묻지 않고 그 편을 건너뛴다
+        noUpload: _noUp,
       }));
       okN++;
     } catch (e) {

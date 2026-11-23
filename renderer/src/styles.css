@@ -2161,6 +2161,7 @@ header.vhead.acct-on .menus .menu.on{border-bottom-color:transparent;color:var(-
 .today-row.unpk:hover{border-color:var(--line)}
 .today-tag.unpk{color:var(--fg-a0522d);background:var(--bg-f7e3d6);max-width:250px;overflow:hidden;text-overflow:ellipsis}
 .today-unpk-n{color:var(--fg-a0522d)}
+.today-nopack{display:inline-flex;align-items:center;gap:4px;margin-left:auto;margin-right:8px;font-size:12px;cursor:pointer}
 .today-empty{padding:28px 0;text-align:center;color:var(--fg-8a7a66)}
 .today-none{margin-top:10px;padding:8px 10px;font-size:12px;line-height:1.5;color:var(--fg-8a7a66);background:var(--bg-f7f2e9);border-radius:8px}
 .today-none-h{font-weight:700;color:var(--strong);margin-bottom:6px}

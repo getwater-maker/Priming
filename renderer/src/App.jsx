@@ -1355,20 +1355,22 @@ export default function App() {
   // 📅 오늘 작업할 대본(v0.9.85) — main 이 채널마다 안 만든 편을 모두 찾아 주면(v1.0.60 · 게시일 순) 골라서 큐에 넣는다. 항목마다 자기 채널(헤더 채널로 덮지 않는다).
   //   📦 패키징 미완(x.pack.ok 거짓)은 보여만 주고 고를 수 없다(v1.0.55 · 판정은 main 의 core/today-scripts 한 곳 — 여기서 다시 판정하지 않는다)
   const todayPackOk = (x) => !!(x && x.pack && x.pack.ok);
+  // 📦 「패키징 없이도 넣기」(v1.0.69 · 로이 2026-11-24 — 음성·그림을 먼저 만들 때) · 기본 꺼짐 = 패키징 끝난 대본만 · 업로드는 main 이 막는다
+  const todayUsable = (tp, x) => todayPackOk(x) || !!(tp && tp.noPack);
   // 빠진 칸 표시만 줄인다(판정은 그대로) — 「썸네일 그림 A·썸네일 그림 B·썸네일 그림 C」 → 「썸네일 그림 A·B·C」(v1.0.60 · 제목이 가려지지 않게)
   const todayMissShort = (miss) => miss.join('·').replace(/(썸네일 그림 [ABC])((?:·썸네일 그림 [ABC])+)/g, (m, a, rest) => a + rest.replace(/썸네일 그림 /g, ''));
   async function openTodayScripts() {
     setTodayPick({ loading: true });
     try {
       const r = await api.todayScriptsScan();
-      setTodayPick({ ...r, sel: Object.fromEntries((r.items || []).map((x) => [x.path, !x.inQueue && todayPackOk(x)])) });
+      setTodayPick({ ...r, noPack: false, sel: Object.fromEntries((r.items || []).map((x) => [x.path, !x.inQueue && todayPackOk(x)])) });
     } catch (e) { setTodayPick(null); logline('오늘 대본 찾기 오류: ' + e.message); }
   }
   async function addTodayScripts() {
     const tp = todayPick; setTodayPick(null);
-    const items = ((tp && tp.items) || []).filter((x) => tp.sel[x.path] && todayPackOk(x)).map((x) => ({ path: x.path, presetName: x.channel }));
+    const items = ((tp && tp.items) || []).filter((x) => tp.sel[x.path] && todayUsable(tp, x)).map((x) => ({ path: x.path, presetName: x.channel }));
     if (!items.length) return;
-    const r = await api.openScriptsList(items);
+    const r = await api.openScriptsList(items, { noPack: !!tp.noPack });
     if (!r) { setStatus('오늘 대본을 열지 못했습니다 — 로그를 보세요'); return; }
     hasStoredRangeRef.current = false;
     if (mode !== 'longform') setMode('longform');
@@ -6442,7 +6444,7 @@ export default function App() {
   // 🧭 메뉴 줄(Vrew 12탭 · Lab) — 옛 리본 블록을 조각으로 잘라 새 탭에 다시 끼운 것. 기능·testid 는 그대로(대조표 docs/VrewLab/리본_선택자_대조표.md)
   const ribOpen = (compact) => (<span className="hgroup" data-testid="rib-open">{!compact && <span className="glabel">대본</span>}
             <button onClick={openScript}><span className="rb-ic">📂</span> <span className="rb-t">열기</span></button>
-            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 편을 모두 찾아(게시일이 이른 편부터) 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다 · 📦 패키징(제목·설명글·태그·고정댓글·썸네일 문구 A)과 🖼 썸네일 그림(⚙ 설정 → 📁 썸네일 폴더)까지 끝난 대본만 넣을 수 있습니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
+            {!compact && feat('todayScripts') && <button data-testid="today-scripts" title="채널마다 게시일이 오늘 이후인 대본 중 아직 안 만든 편을 모두 찾아(게시일이 이른 편부터) 작업큐에 넣습니다(파일 이름의 날짜 [고전_1021] · 2026-10-21 · 채널 「대본 폴더」 아래 · 이미 .vrew·MP4·업로드 기록이 있으면 만든 것으로 봅니다 · 📦 패키징(제목·설명글·태그·고정댓글·썸네일 문구 A)과 🖼 썸네일 그림(⚙ 설정 → 📁 썸네일 폴더)까지 끝난 대본만 넣습니다 — 창의 「📦 패키징 없이도 넣기」를 켜면 미완도 넣을 수 있고, 그 대본은 업로드하지 않습니다)" onClick={openTodayScripts}><span className="rb-ic">📅</span> <span className="rb-t">오늘 대본</span></button>}
             {!compact && ribReaderBtn}
             {/* ✏ 수정 버튼은 없앴다 — 문장을 클릭해 화면에서 바로 고친다(Enter 나누기 · Backspace/Del 합치기).
                 화면에서 못 고치는 예외(지침 줄을 사이에 둔 문장·표)는 그때 편집창을 열어 준다. */}
@@ -8643,23 +8645,25 @@ export default function App() {
             </div>
             {todayPick.loading ? <div className="today-empty">채널 대본 폴더를 찾는 중…</div> : (<>
               <div className="today-sub">
-                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path]).length} / {(todayPick.items || []).filter(todayPackOk).length}편 선택{(todayPick.items || []).some((x) => !todayPackOk(x)) && <span className="today-unpk-n"> · 📦 패키징 미완 {(todayPick.items || []).filter((x) => !todayPackOk(x)).length}편</span>}</span>
-                {(todayPick.items || []).some(todayPackOk) && (() => {
-                  const ready = (todayPick.items || []).filter(todayPackOk);
+                <span>{(todayPick.items || []).filter((x) => todayPick.sel[x.path] && todayUsable(todayPick, x)).length} / {(todayPick.items || []).filter((x) => todayUsable(todayPick, x)).length}편 선택{(todayPick.items || []).some((x) => !todayPackOk(x)) && <span className="today-unpk-n"> · 📦 패키징 미완 {(todayPick.items || []).filter((x) => !todayPackOk(x)).length}편</span>}</span>
+                {(todayPick.items || []).some((x) => !todayPackOk(x)) && <label className="today-nopack" data-testid="today-nopack"><input type="checkbox" checked={!!todayPick.noPack} onChange={(e) => { const on = e.target.checked; setTodayPick((t) => ({ ...t, noPack: on, sel: Object.fromEntries((t.items || []).map((x) => [x.path, todayPackOk(x) ? !!t.sel[x.path] : (on && !x.inQueue)])) })); }} /> 📦 패키징 없이도 넣기</label>}
+                <Hint>패키징이 덜 끝난 대본도 큐에 넣습니다 — 리본 「🎤 TTS+이미지」로 음성·그림을 먼저 만들어 둘 때. ⚡ 만들기를 해도 패키징이 끝나기 전에는 유튜브에 올리지 않습니다.</Hint>
+                {(todayPick.items || []).some((x) => todayUsable(todayPick, x)) && (() => {
+                  const ready = (todayPick.items || []).filter((x) => todayUsable(todayPick, x));
                   const all = ready.every((x) => todayPick.sel[x.path]);
-                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, todayPackOk(x) && !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
+                  return <button className="ghost today-all" onClick={() => setTodayPick((t) => ({ ...t, sel: Object.fromEntries((t.items || []).map((x) => [x.path, todayUsable(t, x) && !all])) }))}>{all ? '모두 해제' : '모두 선택'}</button>;
                 })()}
               </div>
               <div className="today-list">
                 {!(todayPick.items || []).length && <div className="today-empty">오늘 이후에 아직 안 만든 대본이 없습니다.</div>}
                 {(todayPick.items || []).map((x) => {
-                  const pk = todayPackOk(x);
-                  const on = pk && !!todayPick.sel[x.path];
+                  const pk = todayPackOk(x), use = todayUsable(todayPick, x);
+                  const on = use && !!todayPick.sel[x.path];
                   const miss = (x.pack && x.pack.missing) || ['패키징 파일'];
                   return (
                     <label key={x.path} className={`today-row${on ? ' on' : ''}${pk ? '' : ' unpk'}`} data-pack={pk ? 'ok' : 'missing'} title={pk ? x.path : `${x.path}
 📦 패키징·썸네일 그림이 끝나야 큐에 넣을 수 있습니다 — 빠진 것: ${miss.join(' · ')}`}>
-                      <input type="checkbox" checked={on} disabled={!pk} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
+                      <input type="checkbox" checked={on} disabled={!use} onChange={(e) => setTodayPick((t) => ({ ...t, sel: { ...t.sel, [x.path]: e.target.checked } }))} />
                       <span className="today-ch">{x.channel}</span>
                       <span className="today-md">{x.date.slice(5).replace('-', '')}</span>
                       <span className="today-name">{x.name}</span>
@@ -8677,7 +8681,7 @@ export default function App() {
             </>)}
             <div className="modal-actions today-actions">
               <button className="ghost" onClick={() => setTodayPick(null)}>취소</button>
-              <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path] && todayPackOk(x))} onClick={addTodayScripts}>작업큐에 넣기</button>
+              <button data-testid="today-add" disabled={todayPick.loading || !(todayPick.items || []).some((x) => todayPick.sel[x.path] && todayUsable(todayPick, x))} onClick={addTodayScripts}>작업큐에 넣기</button>
             </div>
           </div>
         </div>

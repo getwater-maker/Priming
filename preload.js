@@ -35,7 +35,7 @@ contextBridge.exposeInMainWorld('api', {
   setGeminiImageConfig: (patch) => ipcRenderer.invoke('set-gemini-image-config', patch),
   openScript: (args) => ipcRenderer.invoke('open-script', args),
   todayScriptsScan: () => ipcRenderer.invoke('today-scripts-scan'),   // 📅 오늘 작업할 대본(v0.9.85)
-  openScriptsList: (items) => ipcRenderer.invoke('open-scripts-list', { items }),
+  openScriptsList: (items, opts) => ipcRenderer.invoke('open-scripts-list', { items, noPack: !!(opts && opts.noPack) }),   // 📦 noPack = 패키징 미완도 넣기(v1.0.69 · 업로드는 안 함)
   ttsBuild: (args) => ipcRenderer.invoke('tts-build', args),
   deleteTts: () => ipcRenderer.invoke('delete-tts'),
   imageBuild: (args) => ipcRenderer.invoke('image-build', args),
